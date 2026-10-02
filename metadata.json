@@ -1,0 +1,7 @@
+{
+  "name": "My BCS Servis Raporlama ve Düşeyara Analiz Platformu",
+  "description": "Bosch Car Service (My BCS) çift sayfalı Excel raporlama, satır filtreleme, Düşeyara (VLOOKUP) eşleştirme, servis listesi entegrasyonu ve hizmet kodu çözümleme sistemi.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
