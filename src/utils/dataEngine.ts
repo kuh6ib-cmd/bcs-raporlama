@@ -383,12 +383,13 @@ export function executeSPOSPRPipeline(params: {
 
   // 2. Identify Non-Service / Metadata Headers to Filter Out
   const metadataLower = new Set([
-    'tenant', 'spo_tenant',
+    'tenant', 'spo_tenant', 'tenantid', 'tenant_id',
     'spo_id', 'spoid', 'id', '_id', 'sıra', 'sira', 'no',
     'spo_name', 'sponame',
     'spo_onlinebooking_lastmodified', 'onlinebooking_lastmodified', 'spo_online_booking_lastmodified', 'online_booking_lastmodified',
     'spo_lastmodified', 'lastmodified', 'last_modified', 'modified', 'modified_date', 'last_modified_date',
     'spo_externaldata', 'spo_external_data', 'externaldata', 'external_data', 'spo_externalid', 'externalid', 'external_id',
+    'spo_externaldatasource', 'spo_external_data_source', 'externaldatasource', 'external_data_source', 'datasource', 'data_source', 'source',
     'spo_created', 'created', 'created_date', 'create_date', 'spo_created_date',
     'customerid', 'musterino', 'müşteri no', 'dissap', 'cari', 'cari kodu', 'cari no',
     'crm create date', 'crm_create_date', 'tarih', 'kayit tarihi', 'kayıt tarihi', 'giris tarihi', 'giriş tarihi',
@@ -405,26 +406,37 @@ export function executeSPOSPRPipeline(params: {
     'col_a', 'col_b', 'col_c', 'col_d', 'col_e', 'col_f', 'col_g', 'col_h', 'col_i', 'col_j'
   ]);
 
-  // Extract Services from SPR Sheet (Columns K to AA: index 10 to 26)
-  const sprServiceHeaders: string[] = [];
-  if (sprSheet.headers && sprSheet.headers.length > 10) {
-    const endIndex = Math.min(27, sprSheet.headers.length);
+  const isMetadataHeader = (h: string): boolean => {
+    const raw = String(h).trim();
+    const clean = raw.toLowerCase().replace(/[\s\-_]/g, '');
+    if (!clean) return true;
+    if (clean.startsWith('__empty')) return true;
+    if (metadataLower.has(clean) || metadataLower.has(raw.toLowerCase())) return true;
+    if (clean.includes('externaldata') || clean.includes('externalid') || clean.includes('datasource') || clean.includes('lastmodified') || clean.includes('createddate') || clean.includes('tenant') || clean.includes('spoid') || clean.includes('sponame') || clean.includes('timezone')) return true;
+    if (clean === 'claimed' || clean.includes('claimed') || clean === 'itiraz' || clean.includes('itiraz')) return true;
+    if (clean === 'deletecandidate' || clean.includes('deletecandidate') || clean.includes('delete_candidate') || clean.includes('silmeaday')) return true;
+    if (h === sprClaimedCol || h === sprDeleteCandidateCol || h === sprCustomerIdCol || h === spoCustomerIdCol || h === spoDateCol || h === spoOnlineCol) return true;
+    return false;
+  };
+
+  // Extract Services from SPO Sheet (Columns K to AA: index 10 to 26 inclusive)
+  const spoKToAaHeaders: string[] = [];
+  if (spoSheet.headers && spoSheet.headers.length > 10) {
+    const endIndex = Math.min(27, spoSheet.headers.length);
     for (let i = 10; i < endIndex; i++) {
-      const h = sprSheet.headers[i];
-      if (h && String(h).trim() !== '') {
-        sprServiceHeaders.push(h);
+      const h = spoSheet.headers[i];
+      if (h && String(h).trim() !== '' && !isMetadataHeader(h)) {
+        spoKToAaHeaders.push(h);
       }
     }
   }
 
-  // Extract Services from SPO Sheet
+  // Extract all other non-metadata service headers from SPO Sheet
   const spoServiceHeaders = spoSheet.headers.filter((h) => {
+    if (isMetadataHeader(h)) return false;
+
     const raw = String(h).trim();
     const clean = raw.toLowerCase();
-    if (!clean) return false;
-    if (clean.startsWith('__empty')) return false;
-    if (metadataLower.has(clean)) return false;
-    if (h === spoCustomerIdCol || h === spoDateCol || h === spoOnlineCol) return false;
 
     // Pattern-based exclusions for SPO system metadata
     if (clean.includes('lastmodified') || clean.includes('last_modified')) return false;
@@ -445,19 +457,45 @@ export function executeSPOSPRPipeline(params: {
     return true;
   });
 
-  // Effective Service Columns:
-  // As specified, SPR Columns K through AA are the primary service and pricing columns!
+  // Extract Services from SPR Sheet (Columns K to AA) as secondary reference
+  const sprServiceHeaders: string[] = [];
+  if (sprSheet.headers && sprSheet.headers.length > 10) {
+    const endIndex = Math.min(27, sprSheet.headers.length);
+    for (let i = 10; i < endIndex; i++) {
+      const h = sprSheet.headers[i];
+      if (h && String(h).trim() !== '' && !isMetadataHeader(h)) {
+        sprServiceHeaders.push(h);
+      }
+    }
+  }
+
+  // Effective Service Columns: SPO Columns K through AA take top priority!
   let serviceColumns: string[] = [];
-  if (sprServiceHeaders.length > 0) {
-    serviceColumns = [...sprServiceHeaders];
+  if (spoKToAaHeaders.length > 0) {
+    serviceColumns = [...spoKToAaHeaders];
     for (const h of spoServiceHeaders) {
       if (!serviceColumns.includes(h)) {
         serviceColumns.push(h);
       }
     }
+    for (const h of sprServiceHeaders) {
+      if (!serviceColumns.includes(h)) {
+        serviceColumns.push(h);
+      }
+    }
+  } else if (spoServiceHeaders.length > 0) {
+    serviceColumns = [...spoServiceHeaders];
+    for (const h of sprServiceHeaders) {
+      if (!serviceColumns.includes(h)) {
+        serviceColumns.push(h);
+      }
+    }
   } else {
-    serviceColumns = spoServiceHeaders;
+    serviceColumns = sprServiceHeaders;
   }
+
+  // Final strict filter: ensure no claimed/deletecandidate/metadata header is included as a service
+  serviceColumns = serviceColumns.filter((col) => !isMetadataHeader(col));
 
   // 3. Index SPR Sheet by CUSTOMERID
   const sprLookupMap = new Map<string, { claimed: string; deleteCandidate: string; rawRow: Record<string, any> }>();
@@ -522,11 +560,19 @@ export function executeSPOSPRPipeline(params: {
     const lower = raw.toLowerCase();
     const digits = raw.replace(/\D/g, '');
 
-    // Position-based mapping for SPR columns K to AA (index 10 to 26)
+    // Check if raw header is a generic placeholder (like "Col_K", "__EMPTY_10", "Column 12")
+    const isGenericHeader = 
+      lower.startsWith('col_') || 
+      lower.startsWith('col') || 
+      lower.startsWith('__empty') || 
+      lower.startsWith('sütun') || 
+      lower.startsWith('column');
+
+    // Position-based mapping ONLY for generic placeholder headers in SPR columns K to AA (index 10 to 26)
     const sprIndex = sprSheet.headers ? sprSheet.headers.indexOf(rawCol) : -1;
     let positionService: Service18xItem | undefined = undefined;
-    if (sprIndex >= 10 && sprIndex <= 26) {
-      const stdIdx = (sprIndex - 10) + 1; // Column K maps to STANDARD_BCS_SERVICES[1] (Periyodik Bakım)
+    if (isGenericHeader && sprIndex >= 10 && sprIndex <= 26) {
+      const stdIdx = (sprIndex - 10) + 1; // Column K maps to STANDARD_BCS_SERVICES[1]
       if (stdIdx < STANDARD_BCS_SERVICES.length) {
         const stdName = STANDARD_BCS_SERVICES[stdIdx];
         positionService = service18xMap.get(stdName.toLowerCase()) || 
@@ -704,23 +750,32 @@ export function executeSPOSPRPipeline(params: {
     const pricesInRow: number[] = [];
 
     serviceColumns.forEach((svcCol) => {
-      // 1. Primary lookup: Check SPR sheet for this CUSTOMERID (Services and pricing are in Columns K to AA in SPR)
-      let rawCellVal: any = sprData?.rawRow?.[svcCol];
+      // 1. Primary lookup: Check SPO sheet for this CUSTOMERID (Services and pricing are in Columns K to AA in SPO)
+      let rawCellVal: any = spoRow[svcCol];
 
-      // 2. Lookup by column index if sprSheet has this column between index 10 and 26
-      if ((rawCellVal === undefined || rawCellVal === null || String(rawCellVal).trim() === '') && sprData?.rawRow) {
-        const colIdx = sprSheet.headers ? sprSheet.headers.indexOf(svcCol) : -1;
+      // 2. Lookup by column index if spoSheet has this column between index 10 and 26
+      if (rawCellVal === undefined || rawCellVal === null || String(rawCellVal).trim() === '') {
+        const colIdx = spoSheet.headers ? spoSheet.headers.indexOf(svcCol) : -1;
         if (colIdx >= 10 && colIdx <= 26) {
-          const sprKeys = Object.keys(sprData.rawRow);
-          if (sprKeys[colIdx] !== undefined) {
-            rawCellVal = sprData.rawRow[sprKeys[colIdx]];
+          const spoKeys = Object.keys(spoRow);
+          if (spoKeys[colIdx] !== undefined) {
+            rawCellVal = spoRow[spoKeys[colIdx]];
           }
         }
       }
 
-      // 3. Fallback: Check SPO sheet
-      if (rawCellVal === undefined || rawCellVal === null || String(rawCellVal).trim() === '') {
-        rawCellVal = spoRow[svcCol];
+      // 3. Fallback: Check SPR sheet
+      if ((rawCellVal === undefined || rawCellVal === null || String(rawCellVal).trim() === '') && sprData?.rawRow) {
+        rawCellVal = sprData.rawRow[svcCol];
+        if (rawCellVal === undefined || rawCellVal === null || String(rawCellVal).trim() === '') {
+          const colIdx = sprSheet.headers ? sprSheet.headers.indexOf(svcCol) : -1;
+          if (colIdx >= 10 && colIdx <= 26) {
+            const sprKeys = Object.keys(sprData.rawRow);
+            if (sprKeys[colIdx] !== undefined) {
+              rawCellVal = sprData.rawRow[sprKeys[colIdx]];
+            }
+          }
+        }
       }
 
       const val = (rawCellVal === undefined || rawCellVal === null || String(rawCellVal).trim() === '') ? 'HAYIR' : rawCellVal;
