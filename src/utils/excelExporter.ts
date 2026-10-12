@@ -31,9 +31,11 @@ function styleWorksheet(
     isServiceStatsSheet?: boolean;
     isUnpivotedSheet?: boolean;
     isDroppedSheet?: boolean;
+    canViewPricing?: boolean;
   }
 ) {
   if (!ws || !ws['!ref']) return;
+  const canViewPricing = styles.canViewPricing ?? true;
 
   // Always enable visible gridlines in Excel viewers
   ws['!sheetViews'] = [{ showGridLines: true }];
@@ -75,15 +77,19 @@ function styleWorksheet(
           } else if (R === 2) {
             cell.s.fill = { fgColor: { rgb: 'DCFCE7' } }; // Soft Emerald Green
             cell.s.font.color = { rgb: '14532D' };
+            if (!canViewPricing && C === 4) cell.v = '🔒 Kısıtlı';
           } else if (R === 3) {
             cell.s.fill = { fgColor: { rgb: 'FEF3C7' } }; // Soft Amber Yellow
             cell.s.font.color = { rgb: '78350F' };
+            if (!canViewPricing && C === 4) cell.v = '🔒 Kısıtlı';
           } else if (R === 4) {
             cell.s.fill = { fgColor: { rgb: 'FFE4E6' } }; // Soft Rose Red
             cell.s.font.color = { rgb: '9F1239' };
+            if (!canViewPricing && C === 4) cell.v = '🔒 Kısıtlı';
           } else if (R === 5) {
             cell.s.fill = { fgColor: { rgb: 'DBEAFE' } }; // Soft Royal Blue
             cell.s.font.color = { rgb: '1E40AF' };
+            if (!canViewPricing && C === 4) cell.v = '🔒 Kısıtlı';
           }
           continue;
         }
@@ -121,29 +127,46 @@ function styleWorksheet(
             cell.s.alignment = { vertical: 'center', horizontal: 'center' };
 
             if (parsed.status === 'PRICED') {
-              cell.s.fill = { fgColor: { rgb: 'FEF3C7' } }; // Soft Gold/Amber fill
-              cell.s.font = { name: 'Calibri', sz: 10, bold: true, color: { rgb: '78350F' } };
-              if (parsed.priceNumeric !== null) {
-                cell.t = 'n';
-                cell.v = parsed.priceNumeric;
-                cell.z = '#,##0 "TL"';
+              if (canViewPricing) {
+                cell.s.fill = { fgColor: { rgb: 'FEF3C7' } }; // Soft Gold/Amber fill
+                cell.s.font = { name: 'Calibri', sz: 10, bold: true, color: { rgb: '78350F' } };
+                if (parsed.priceNumeric !== null) {
+                  cell.t = 'n';
+                  cell.v = parsed.priceNumeric;
+                  cell.z = '#,##0 "TL"';
+                }
+              } else {
+                cell.t = 's';
+                cell.v = 'EVET';
+                cell.s.fill = { fgColor: { rgb: 'DBEAFE' } }; // Soft Blue fill
+                cell.s.font = { name: 'Calibri', sz: 10, bold: true, color: { rgb: '1E40AF' } };
               }
             } else if (parsed.status === 'FREE') {
-              cell.s.fill = { fgColor: { rgb: 'DCFCE7' } }; // Soft Emerald Green fill
-              cell.s.font = { name: 'Calibri', sz: 10, bold: true, color: { rgb: '14532D' } };
-              cell.t = 'n';
-              cell.v = 0;
-              cell.z = '0 "TL (Ücretsiz)"';
+              if (canViewPricing) {
+                cell.s.fill = { fgColor: { rgb: 'DCFCE7' } }; // Soft Emerald Green fill
+                cell.s.font = { name: 'Calibri', sz: 10, bold: true, color: { rgb: '14532D' } };
+                cell.t = 'n';
+                cell.v = 0;
+                cell.z = '0 "TL (Ücretsiz)"';
+              } else {
+                cell.t = 's';
+                cell.v = 'EVET (0 TL)';
+                cell.s.fill = { fgColor: { rgb: 'DCFCE7' } };
+                cell.s.font = { name: 'Calibri', sz: 10, bold: true, color: { rgb: '14532D' } };
+              }
             } else if (parsed.status === 'NO_PRICE') {
               cell.s.fill = { fgColor: { rgb: 'F1F5F9' } }; // Light Slate Gray fill
               cell.s.font = { name: 'Calibri', sz: 10, color: { rgb: '475569' } };
+              cell.v = 'NOPRICE';
             } else if (parsed.status === 'OFFERED_YES') {
               cell.s.fill = { fgColor: { rgb: 'DBEAFE' } }; // Soft Blue fill
               cell.s.font = { name: 'Calibri', sz: 10, bold: true, color: { rgb: '1E40AF' } };
+              cell.v = 'EVET';
             } else {
               // NOT_OFFERED (HAYIR)
               cell.s.fill = { fgColor: { rgb: 'FFE4E6' } }; // Soft Rose/Red fill
               cell.s.font = { name: 'Calibri', sz: 10, color: { rgb: '9F1239' } };
+              cell.v = 'HAYIR';
             }
           }
         }
@@ -172,26 +195,35 @@ function styleWorksheet(
           } else if (C >= 6 && C <= 8) {
             // Price columns
             cell.s.alignment = { vertical: 'center', horizontal: 'right' };
-            if (typeof cell.v === 'number') {
-              cell.t = 'n';
-              cell.z = '#,##0 "TL"';
+            if (canViewPricing) {
+              if (typeof cell.v === 'number') {
+                cell.t = 'n';
+                cell.z = '#,##0 "TL"';
+              }
+            } else {
+              cell.t = 's';
+              cell.v = '🔒 Gizli';
             }
           } else if (C === 9) {
             // Coverage rate percentage
             cell.s.alignment = { vertical: 'center', horizontal: 'center' };
             cell.s.font = { name: 'Calibri', sz: 10, bold: true };
-            const numVal = parseFloat(String(cell.v).replace('%', ''));
-            if (!isNaN(numVal)) {
-              if (numVal >= 80) {
-                cell.s.fill = { fgColor: { rgb: 'DCFCE7' } };
-                cell.s.font.color = { rgb: '14532D' };
-              } else if (numVal >= 40) {
-                cell.s.fill = { fgColor: { rgb: 'FEF3C7' } };
-                cell.s.font.color = { rgb: '78350F' };
-              } else {
-                cell.s.fill = { fgColor: { rgb: 'FFE4E6' } };
-                cell.s.font.color = { rgb: '9F1239' };
+            if (canViewPricing) {
+              const numVal = parseFloat(String(cell.v).replace('%', ''));
+              if (!isNaN(numVal)) {
+                if (numVal >= 80) {
+                  cell.s.fill = { fgColor: { rgb: 'DCFCE7' } };
+                  cell.s.font.color = { rgb: '14532D' };
+                } else if (numVal >= 40) {
+                  cell.s.fill = { fgColor: { rgb: 'FEF3C7' } };
+                  cell.s.font.color = { rgb: '78350F' };
+                } else {
+                  cell.s.fill = { fgColor: { rgb: 'FFE4E6' } };
+                  cell.s.font.color = { rgb: '9F1239' };
+                }
               }
+            } else {
+              cell.v = '🔒 Gizli';
             }
           }
         }
@@ -206,9 +238,14 @@ function styleWorksheet(
         } else {
           cell.s.alignment = { vertical: 'center', horizontal: 'left' };
           if (typeof cell.v === 'number') {
-            cell.t = 'n';
-            cell.z = '#,##0 "TL"';
-            cell.s.alignment = { vertical: 'center', horizontal: 'right' };
+            if (canViewPricing) {
+              cell.t = 'n';
+              cell.z = '#,##0 "TL"';
+              cell.s.alignment = { vertical: 'center', horizontal: 'right' };
+            } else {
+              cell.t = 's';
+              cell.v = '🔒 Gizli';
+            }
           }
         }
       }
@@ -244,9 +281,10 @@ export function exportCleanSPOResultExcel(params: {
   summary: BCSMatrixSummary;
   fileName?: string;
   sourceFileName?: string;
+  canViewPricing?: boolean;
   options?: ExportOptions;
 }): void {
-  const { summary, fileName = 'My_BCS_Servis_Fiyat_Raporu.xlsx', options = DEFAULT_EXPORT_OPTIONS } = params;
+  const { summary, fileName = 'My_BCS_Servis_Fiyat_Raporu.xlsx', options = DEFAULT_EXPORT_OPTIONS, canViewPricing = true } = params;
   const cols = options.columns;
 
   const wb = XLSX.utils.book_new();
@@ -279,10 +317,10 @@ export function exportCleanSPOResultExcel(params: {
     const sheetAoa: any[][] = [
       ['', '', '', 'Kayıt Olanların Oranı', summary.registeredRatio],
       ['', '', '', 'Online Olanların Oranı', summary.onlineRatio],
-      ['', '', '', 'Fiyat Kuralı 100% Tam Olan Servis Oranı', summary.pricingCompleteRatio],
-      ['', '', '', 'Fiyat Kuralı 100% Olmayan Servis Oranı', summary.pricingIncompleteRatio],
-      ['', '', '', 'Fiyat Kuralı Hiç Girilmemiş Servis Oranı', summary.noPricingRatio],
-      ['', '', '', 'Ağ Geneli Fiyatlandırma Kapsama Oranı', `%${summary.overallPricingCoveragePct}`],
+      ['', '', '', 'Fiyat Kuralı 100% Tam Olan Servis Oranı', canViewPricing ? summary.pricingCompleteRatio : '🔒 Kısıtlı'],
+      ['', '', '', 'Fiyat Kuralı 100% Olmayan Servis Oranı', canViewPricing ? summary.pricingIncompleteRatio : '🔒 Kısıtlı'],
+      ['', '', '', 'Fiyat Kuralı Hiç Girilmemiş Servis Oranı', canViewPricing ? summary.noPricingRatio : '🔒 Kısıtlı'],
+      ['', '', '', 'Ağ Geneli Fiyatlandırma Kapsama Oranı', canViewPricing ? `%${summary.overallPricingCoveragePct}` : '🔒 Kısıtlı'],
       [],
       []
     ];
@@ -308,6 +346,13 @@ export function exportCleanSPOResultExcel(params: {
         ...activeMetaCols.map((c) => c.getVal(r)),
         ...serviceCols.map((col) => {
           const val = r.serviceValues[col];
+          const parsed = parsePriceValue(val);
+          if (!canViewPricing) {
+            if (parsed.status === 'PRICED' || parsed.status === 'OFFERED_YES') return 'EVET';
+            if (parsed.status === 'FREE') return 'EVET (Ücretsiz)';
+            if (parsed.status === 'NO_PRICE') return 'NOPRICE';
+            return 'HAYIR';
+          }
           return val !== undefined && val !== null ? val : 'HAYIR';
         })
       ];
@@ -319,7 +364,7 @@ export function exportCleanSPOResultExcel(params: {
       ...activeMetaCols.map((c) => ({ wch: c.wch })),
       ...serviceCols.map(() => ({ wch: 24 }))
     ];
-    styleWorksheet(wsMain, { isMatrixSheet: true, metaColsCount: activeMetaCols.length });
+    styleWorksheet(wsMain, { isMatrixSheet: true, metaColsCount: activeMetaCols.length, canViewPricing });
     XLSX.utils.book_append_sheet(wb, wsMain, 'BCS_Matrix_Raporu');
   }
 
@@ -334,18 +379,18 @@ export function exportCleanSPOResultExcel(params: {
       'Hizmet / İşlem Adı': s.serviceName,
       'Hizmeti Veren Servis Sayısı': s.totalOfferCount,
       'Fiyatı Tanımlı Olanlar': s.pricedCount,
-      'Ücretsiz Verenler (0 TL)': s.freeCount,
+      'Ücretsiz Verenler (Dahil)': s.freeCount,
       'Fiyat Girilmemiş (NOPRICE)': s.noPriceCount,
       'Hizmeti Vermeyen Servisler (HAYIR)': s.notOfferedCount,
-      'Min Fiyat (TL)': s.minPrice > 0 ? s.minPrice : '-',
-      'Max Fiyat (TL)': s.maxPrice > 0 ? s.maxPrice : '-',
-      'Ortalama Fiyat (TL)': s.avgPrice > 0 ? s.avgPrice : '-',
-      'Fiyatlandırma Kapsama Oranı': `%${s.pricingCoverageRate}`
+      'Min Fiyat (TL)': canViewPricing ? (s.minPrice > 0 ? s.minPrice : '-') : '🔒 Gizli',
+      'Max Fiyat (TL)': canViewPricing ? (s.maxPrice > 0 ? s.maxPrice : '-') : '🔒 Gizli',
+      'Ortalama Fiyat (TL)': canViewPricing ? (s.avgPrice > 0 ? s.avgPrice : '-') : '🔒 Gizli',
+      'Fiyatlandırma Kapsama Oranı': canViewPricing ? `%${s.pricingCoverageRate}` : '🔒 Gizli'
     })));
     wsServiceStats['!cols'] = [
       { wch: 45 }, { wch: 26 }, { wch: 22 }, { wch: 22 }, { wch: 26 }, { wch: 32 }, { wch: 16 }, { wch: 16 }, { wch: 20 }, { wch: 26 }
     ];
-    styleWorksheet(wsServiceStats, { isServiceStatsSheet: true });
+    styleWorksheet(wsServiceStats, { isServiceStatsSheet: true, canViewPricing });
     XLSX.utils.book_append_sheet(wb, wsServiceStats, 'Hizmet_Bazli_Fiyat_Analizi');
   }
 
@@ -360,19 +405,21 @@ export function exportCleanSPOResultExcel(params: {
           rowObj[c.label] = c.getVal(r);
         });
         rowObj['Hizmet Adı'] = sCol;
-        rowObj['Hizmet Durumu'] = statusObj.status === 'PRICED' ? 'Fiyatlı Hizmet' :
-                                   statusObj.status === 'FREE' ? 'Ücretsiz / Dahil (0 TL)' :
+        rowObj['Hizmet Durumu'] = statusObj.status === 'PRICED' ? (canViewPricing ? 'Fiyatlı Hizmet' : 'Hizmet Veriliyor') :
+                                   statusObj.status === 'FREE' ? 'Ücretsiz / Dahil' :
                                    statusObj.status === 'NO_PRICE' ? 'Fiyat Girilmemiş (NOPRICE)' :
                                    statusObj.status === 'OFFERED_YES' ? 'Veriliyor (Paket / Randevulu)' :
                                    'Hizmet Vermiyor (HAYIR)';
-        rowObj['Fiyat (TL)'] = statusObj.priceNumeric !== null ? statusObj.priceNumeric : '-';
-        rowObj['Matris Değeri'] = statusObj.displayValue;
+        rowObj['Fiyat (TL)'] = canViewPricing ? (statusObj.priceNumeric !== null ? statusObj.priceNumeric : '-') : '🔒 Gizli';
+        rowObj['Matris Değeri'] = canViewPricing 
+          ? statusObj.displayValue 
+          : (statusObj.status === 'PRICED' || statusObj.status === 'OFFERED_YES' ? 'EVET' : statusObj.status === 'FREE' ? 'EVET (Ücretsiz)' : statusObj.status === 'NO_PRICE' ? 'NOPRICE' : 'HAYIR');
         unpivotedRows.push(rowObj);
       });
     });
 
     const wsUnpivoted = XLSX.utils.json_to_sheet(unpivotedRows);
-    styleWorksheet(wsUnpivoted, { isUnpivotedSheet: true });
+    styleWorksheet(wsUnpivoted, { isUnpivotedSheet: true, canViewPricing });
     XLSX.utils.book_append_sheet(wb, wsUnpivoted, 'Servis_Hizmet_Fiyat_Detayi');
   }
 

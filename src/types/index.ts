@@ -113,7 +113,7 @@ export interface ServiceAnalysisItem {
   medianPrice?: number;            // Medyan fiyat
   priceVariancePct?: number;       // Katalog fiyatına göre % sapma
   pricingCoverageRate: number;     // % of offerings with price
-  offeringDealers: { firmName: string; city: string; manager: string; priceText: string; priceNum: number | null; status: string }[];
+  offeringDealers: { firmName: string; city: string; manager: string; priceText: string; priceNum: number | null; status: string; customerId?: string }[];
 }
 
 export interface ExportColumnOptions {
@@ -172,4 +172,47 @@ export interface BCSMatrixSummary {
   cityBreakdown: { city: string; count: number; avgServicesOffered: number }[];
   regionManagerBreakdown: { manager: string; count: number; pricedRate: number }[];
   serviceAnalysisList: ServiceAnalysisItem[];
+}
+
+export type UserRole = 'ADMIN' | 'FIELD_OPERATIONS' | 'REGIONAL_MANAGER';
+
+export type UserAccountStatus = 'APPROVED' | 'PENDING_APPROVAL' | 'REJECTED';
+
+export interface UserPermissions {
+  canViewPricing: boolean;
+  canExportExcel: boolean;
+  canEditServiceCatalog: boolean;
+  canEditDealerList: boolean;
+  canViewDroppedRows: boolean;
+}
+
+export interface UserAccount {
+  id: string;
+  username: string;
+  name: string;
+  email: string;
+  approverEmail?: string;
+  password: string;
+  role: UserRole;
+  roleName: string;
+  description: string;
+  permissions: UserPermissions;
+  status: UserAccountStatus;
+  createdAt: string;
+  approvedAt?: string;
+  approvedBy?: string;
+  rejectionReason?: string;
+}
+
+export interface EmailNotification {
+  id: string;
+  timestamp: string;
+  to: string;
+  from: string;
+  subject: string;
+  body: string;
+  type: 'APPROVAL_REQUEST' | 'REGISTRATION_APPROVED' | 'REGISTRATION_REJECTED';
+  relatedUserId: string;
+  status: 'DELIVERED' | 'READ';
+  actionTaken?: 'APPROVED' | 'REJECTED';
 }

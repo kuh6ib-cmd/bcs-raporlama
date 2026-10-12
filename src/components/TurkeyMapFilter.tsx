@@ -23,6 +23,7 @@ interface TurkeyMapFilterProps {
   selectedCity: string; // 'all' or city name e.g. 'İSTANBUL'
   onSelectCity: (city: string) => void;
   onInspectDealer?: (dealer: BCSMatrixRow) => void;
+  canViewPricing?: boolean;
 }
 
 function normalizeCity(str: string): string {
@@ -118,7 +119,8 @@ export const TurkeyMapFilter: React.FC<TurkeyMapFilterProps> = ({
   summary,
   selectedCity,
   onSelectCity,
-  onInspectDealer
+  onInspectDealer,
+  canViewPricing = true
 }) => {
   const [hoveredCityData, setHoveredCityData] = useState<ExactCityData | null>(null);
   const [dealerSearchQuery, setDealerSearchQuery] = useState('');
@@ -229,7 +231,7 @@ export const TurkeyMapFilter: React.FC<TurkeyMapFilterProps> = ({
 
   // Total counts
   const totalWorkshops = summary?.activeRows?.length || 0;
-  const activeCitiesCount = cityDealersMap.size;
+  const activeCitiesCount = plateDealersMap.size || cityDealersMap.size;
 
   return (
     <div className="space-y-6">
@@ -245,11 +247,11 @@ export const TurkeyMapFilter: React.FC<TurkeyMapFilterProps> = ({
                 <MapPin className="w-3.5 h-3.5" /> Canlı Türkiye Haritası &amp; BCS Filtresi
               </span>
               <span className="text-xs text-slate-400">
-                Toplam <strong className="text-emerald-400 font-bold">{totalWorkshops}</strong> Bosch Car Service Bayisi
+                Toplam <strong className="text-emerald-400 font-bold">{totalWorkshops}</strong> Bosch Car Service
               </span>
             </div>
             <h3 className="text-lg sm:text-xl font-extrabold text-white flex items-center gap-2 tracking-tight">
-              Türkiye İl Haritası — Üzerine Geldiğiniz Şehirdeki Bayileri Görün
+              Türkiye İl Haritası — Üzerine Geldiğiniz İldeki Servisleri Görün
             </h3>
             <p className="text-xs text-slate-400 mt-0.5">
               Farenizi haritadaki herhangi bir ilin üzerine getirin; o ildeki tüm servisler aşağıdaki tabloda anında listelenecektir.
@@ -260,7 +262,7 @@ export const TurkeyMapFilter: React.FC<TurkeyMapFilterProps> = ({
           <div className="flex items-center gap-2 shrink-0">
             {selectedCity !== 'all' ? (
               <div className="flex items-center gap-2 bg-amber-500/15 border border-amber-500/40 text-amber-300 text-xs px-3.5 py-2 rounded-xl font-bold">
-                <span>Filtre: {selectedCity}</span>
+                <span>Filtre: {selectedCity} İlinde Olan Servisler</span>
                 <button
                   type="button"
                   onClick={() => onSelectCity('all')}
@@ -334,7 +336,7 @@ export const TurkeyMapFilter: React.FC<TurkeyMapFilterProps> = ({
                 <Building2 className="w-3.5 h-3.5 text-sky-400" />
                 <span>{hoveredCityData.name}</span>
                 <span className="bg-sky-500/20 text-sky-300 px-2 py-0.5 rounded-md font-mono font-extrabold border border-sky-500/30">
-                  {getDealersForCity(hoveredCityData).length} BCS Bayisi
+                  {getDealersForCity(hoveredCityData).length} Bosch Car Service
                 </span>
               </div>
             ) : (
@@ -347,7 +349,7 @@ export const TurkeyMapFilter: React.FC<TurkeyMapFilterProps> = ({
           {/* SVG Canvas */}
           <div className="w-full flex items-center justify-center">
             <svg
-              viewBox="10 135 1030 460"
+              viewBox="10 135 1030 475"
               className="w-full h-auto max-h-[520px] select-none"
               style={{ filter: 'drop-shadow(0px 6px 12px rgba(15, 23, 42, 0.12))' }}
             >
@@ -402,7 +404,7 @@ export const TurkeyMapFilter: React.FC<TurkeyMapFilterProps> = ({
                       filter={isSelected ? 'url(#glow-red)' : isHovered ? 'url(#glow-gold)' : undefined}
                       className="transition-colors duration-200 hover:brightness-110"
                     >
-                      <title>{city.name}: {dealerCount} BCS Bayisi</title>
+                      <title>{city.name}: {dealerCount} Bosch Car Service</title>
                     </path>
                   </g>
                 );
@@ -411,18 +413,18 @@ export const TurkeyMapFilter: React.FC<TurkeyMapFilterProps> = ({
           </div>
 
           {/* Footer Info & Legend Description */}
-          <div className="flex flex-col sm:flex-row items-center justify-between gap-2 pt-2 px-1 text-[11px] text-slate-500 border-t border-slate-100">
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-2 pt-2 px-1 text-[11px] text-slate-400 border-t border-slate-800">
             <span className="flex items-center gap-1.5">
               <span>🔵</span>
-              <span><strong>Mavi Yoğunluk Haritası:</strong> Servis sayısı arttıkça il rengi açıktan koyu maviye ve gece mavisine döner.</span>
+              <span><strong>Mavi Yoğunluk Haritası:</strong> Servis sayısı arttıkça il rengi açıktan koyu maviye döner.</span>
             </span>
-            <span className="font-semibold text-slate-600">Toplam {activeCitiesCount} İlde BCS Ağı</span>
+            <span className="font-semibold text-slate-300">Toplam {activeCitiesCount} İlde Bosch Car Service</span>
           </div>
         </div>
 
       </div>
 
-      {/* 2. DYNAMIC FILTER TABLE (Üzerine gelinen / Seçilen ildeki BCS Bayileri Tablosu) */}
+      {/* 2. DYNAMIC FILTER TABLE (Üzerine gelinen / Seçilen ildeki Bosch Car Service Tablosu) */}
       <div 
         ref={tableRef}
         className="bg-slate-900 border-2 border-red-500/30 rounded-3xl p-6 sm:p-7 shadow-2xl space-y-4 ring-1 ring-red-500/20"
@@ -445,7 +447,7 @@ export const TurkeyMapFilter: React.FC<TurkeyMapFilterProps> = ({
                 ) : null}
               </div>
               <h3 className="text-xl font-black text-white flex items-center gap-2 mt-1">
-                📍 {activeCityObject?.name || 'Seçili İl'} İlindeki Bosch Car Service Bayileri
+                📍 {activeCityObject ? `${activeCityObject.displayName || activeCityObject.name} İlinde Olan Servisler` : 'Seçili İlde Olan Servisler'}
                 <span className="text-sm font-bold px-2.5 py-0.5 rounded-full bg-slate-800 text-slate-300 font-mono">
                   {activeCityDealers.length} Servis
                 </span>
@@ -585,7 +587,7 @@ export const TurkeyMapFilter: React.FC<TurkeyMapFilterProps> = ({
                             {totalOffered} / {totalCols} Hizmet
                           </span>
                           <span className="text-[10px] text-emerald-400 font-semibold font-mono">
-                            {totalPriced} Fiyat Tanımlı
+                            {canViewPricing ? `${totalPriced} Fiyat Tanımlı` : '🔒 Fiyat Kısıtlı'}
                           </span>
                         </div>
                       </td>
@@ -617,7 +619,7 @@ export const TurkeyMapFilter: React.FC<TurkeyMapFilterProps> = ({
                 {activeCityObject ? `${activeCityObject.name} ilinde kayıtlı Bosch Car Service bulunmuyor.` : 'Bir il seçin.'}
               </p>
               <p className="text-xs text-slate-500 mt-1">
-                Yukarıdaki haritadan bayisi olan (üzerinde kırmızı rozet bulunan) illerin üzerine gelerek servisleri listeleyebilirsiniz.
+                Yukarıdaki haritadan servisi olan illerin üzerine gelerek servisleri listeleyebilirsiniz.
               </p>
             </div>
           </div>

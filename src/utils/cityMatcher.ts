@@ -92,7 +92,7 @@ export const TURKEY_PROVINCE_REGISTRY: ProvinceMeta[] = [
   { plate: 81, name: 'Düzce', displayName: 'Düzce', aliases: ['DUZCE', 'DÜZCE', 'AKÇAKOCA'] }
 ];
 
-function cleanTurkishText(str: string): string {
+export function cleanTurkishText(str: string): string {
   if (!str) return '';
   return str
     .toLocaleUpperCase('tr-TR')

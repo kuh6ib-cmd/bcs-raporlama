@@ -1,6 +1,6 @@
 import * as XLSX from "xlsx";
 import { WorkbookData, BCSServiceMasterItem, Service18xItem } from "../types";
-import { DEFAULT_BCS_MASTER_SERVICES, STANDARD_BCS_SERVICES } from "../data/defaultCatalog";
+import { DEFAULT_BCS_MASTER_SERVICES, STANDARD_BCS_SERVICES, DEFAULT_18X_SERVICES } from "../data/defaultCatalog";
 
 export function generateSampleSPOSPRWorkbook(): { 
   workbook: XLSX.WorkBook; 
@@ -87,30 +87,33 @@ export function generateSampleSPOSPRWorkbook(): {
     };
   });
 
-  // 1. Build SPO rows (Metadata & Online Booking)
-  const spoRows = sampleDataMatrix.map((item) => ({
-    "Col_A": "SPO-SYS",
-    "Col_B": "B-VAL",
-    "CUSTOMERID": item.id,
-    "FİRMA (TABELA)": item.bcs,
-    "crm create date": item.date,
-    "İL": item.city,
-    "İLÇE": item.district,
-    "BÖLGE YÖNETİCİSİ": item.manager,
-    "SAHA": item.field,
-    "SPO_ONLINEBOOKING": item.online
-  }));
-
-  // 2. Build SPR rows:
-  // Columns A-J (indices 0 to 9) contain SPR metadata (CUSTOMERID, CLAIMED, DELETECANDIDATE)
-  // Columns K to AA (indices 10 to 26) contain the services and dealer pricing!
-  const sprRows = sampleDataMatrix.map((item) => {
-    // Select the standard services for columns K through AA (17 services)
+  // 1. Build SPO rows (Metadata in Columns A-J, 17 Services in Columns K-AA)
+  const spoRows = sampleDataMatrix.map((item) => {
+    // Columns K through AA (indices 10 to 26 inclusive = 17 services)
     const kToAaServices: Record<string, any> = {};
-    STANDARD_BCS_SERVICES.slice(1, 18).forEach((svcName) => {
-      kToAaServices[svcName] = item.services[svcName] !== undefined ? item.services[svcName] : 'HAYIR';
+    DEFAULT_18X_SERVICES.slice(0, 17).forEach((svc) => {
+      const codeKey = svc.serviceCode;
+      const nameKey = svc.serviceName;
+      kToAaServices[codeKey] = item.services[nameKey] !== undefined ? item.services[nameKey] : 'HAYIR';
     });
 
+    return {
+      "Col_A": "SPO-SYS",
+      "Col_B": "B-VAL",
+      "CUSTOMERID": item.id,
+      "FİRMA (TABELA)": item.bcs,
+      "crm create date": item.date,
+      "İL": item.city,
+      "İLÇE": item.district,
+      "BÖLGE YÖNETİCİSİ": item.manager,
+      "SAHA": item.field,
+      "SPO_ONLINEBOOKING": item.online,
+      ...kToAaServices
+    };
+  });
+
+  // 2. Build SPR rows (Metadata: CUSTOMERID, CLAIMED, DELETECANDIDATE)
+  const sprRows = sampleDataMatrix.map((item) => {
     return {
       "Col_A": "SPR-SEQ",
       "Col_B": "B-VAL",
@@ -121,27 +124,50 @@ export function generateSampleSPOSPRWorkbook(): {
       "Col_G": "G-VAL",
       "Col_H": "H-VAL",
       "CLAIMED": item.claimed,
-      "DELETECANDIDATE": item.deleteCandidate,
-      ...kToAaServices
+      "DELETECANDIDATE": item.deleteCandidate
     };
   });
 
   // 3. Build BCS Master List (Dissap)
   const sampleBcsMasterList = DEFAULT_BCS_MASTER_SERVICES;
 
-  // 4. Sample 18x service list
-  const sample18xServices: Service18xItem[] = STANDARD_BCS_SERVICES.map((name, idx) => ({
-    serviceCode: "180" + String(idx + 1001),
-    serviceName: name,
-    serviceCategory: "Bosch Servis Hizmeti",
-    laborHours: 1.0,
-    price: 1500
-  }));
+  // 4. Sample 18x service list (Uses canonical Bosch Car Service catalog)
+  const sample18xServices: Service18xItem[] = DEFAULT_18X_SERVICES;
+
+  // Explicit column order definition for physical Excel layout:
+  // Columns A-J (indices 0 to 9) = Metadata
+  // Columns K-AA (indices 10 to 26) = 17 Canonical Services
+  const spoHeaderOrder = [
+    "Col_A",
+    "Col_B",
+    "CUSTOMERID",
+    "FİRMA (TABELA)",
+    "crm create date",
+    "İL",
+    "İLÇE",
+    "BÖLGE YÖNETİCİSİ",
+    "SAHA",
+    "SPO_ONLINEBOOKING",
+    ...DEFAULT_18X_SERVICES.slice(0, 17).map((s) => s.serviceCode)
+  ];
+
+  const sprHeaderOrder = [
+    "Col_A",
+    "Col_B",
+    "CUSTOMERID",
+    "Dissap",
+    "Col_E",
+    "Col_F",
+    "Col_G",
+    "Col_H",
+    "CLAIMED",
+    "DELETECANDIDATE"
+  ];
 
   // Workbooks Generation
   const wb = XLSX.utils.book_new();
-  const wsSPO = XLSX.utils.json_to_sheet(spoRows);
-  const wsSPR = XLSX.utils.json_to_sheet(sprRows);
+  const wsSPO = XLSX.utils.json_to_sheet(spoRows, { header: spoHeaderOrder });
+  const wsSPR = XLSX.utils.json_to_sheet(sprRows, { header: sprHeaderOrder });
   XLSX.utils.book_append_sheet(wb, wsSPO, "SPO");
   XLSX.utils.book_append_sheet(wb, wsSPR, "SPR");
   const wbout = XLSX.write(wb, { bookType: "xlsx", type: "array", compression: true });
@@ -182,13 +208,13 @@ export function generateSampleSPOSPRWorkbook(): {
     sheets: {
       "SPO": {
         name: "SPO",
-        headers: Object.keys(spoRows[0]),
+        headers: spoHeaderOrder,
         rows: spoRows,
         totalRawRows: spoRows.length
       },
       "SPR": {
         name: "SPR",
-        headers: Object.keys(sprRows[0]),
+        headers: sprHeaderOrder,
         rows: sprRows,
         totalRawRows: sprRows.length
       }

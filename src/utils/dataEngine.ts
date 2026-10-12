@@ -11,8 +11,8 @@ import {
   ServiceAnalysisItem,
   ServiceColumnMeta
 } from '../types';
-import { STANDARD_BCS_SERVICES, DEFAULT_18X_SERVICES } from '../data/defaultCatalog';
-import { resolveProvincePlate, getProvinceByPlate } from './cityMatcher';
+import { STANDARD_BCS_SERVICES, DEFAULT_18X_SERVICES, SPO_K_TO_AA_SERVICES } from '../data/defaultCatalog';
+import { resolveProvincePlate, getProvinceByPlate, cleanTurkishText } from './cityMatcher';
 
 export function safeReadExcel(data: ArrayBuffer): XLSX.WorkBook {
   const origError = console.error;
@@ -84,7 +84,17 @@ export async function parseExcelFile(file: File): Promise<WorkbookData> {
         for (const name of sheetNames) {
           const ws = workbook.Sheets[name];
           const rawJson = XLSX.utils.sheet_to_json(ws, { defval: '', raw: false }) as Record<string, any>[];
-          const headers = rawJson.length > 0 ? Object.keys(rawJson[0]) : [];
+
+          // Use header: 1 to get exact physical left-to-right column order from row 1 (A, B, C... K... AA)
+          // (Object.keys() re-orders integer keys like '18000' to the beginning, breaking column order!)
+          const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, defval: '', raw: false }) as any[][];
+          let headers: string[] = [];
+          if (aoa && aoa.length > 0 && Array.isArray(aoa[0])) {
+            headers = aoa[0].map((c) => String(c !== undefined && c !== null ? c : '').trim());
+          }
+          if (headers.length === 0 && rawJson.length > 0) {
+            headers = Object.keys(rawJson[0]);
+          }
 
           sheets[name] = {
             name,
@@ -347,6 +357,37 @@ export function normalizeCustomerId(val: any): string {
 }
 
 /**
+ * Bidirectional cross-mapping for Bosch Car Service 5-digit and 7-digit 18xxxxx codes
+ */
+export const CODE_5_TO_7_MAP: Record<string, string> = {
+  '18000': '1801001', // Genel Randevu
+  '18001': '1802001', // Periyodik Bakım
+  '18002': '1802002', // Motor Yağ Değişimi
+  '18003': '1814001', // Triger Kayışı Değişimi
+  '18004': '1803001', // Fren Sistemi Kontrolü
+  '18005': '1808001', // Araç Muayenesi Öncesi Mevzuata Uygunluk Kontrolü
+  '18006': '1809001', // Genel Araç Kontrolü
+  '18007': '1804001', // Rot Ayarı
+  '18008': '1805001', // Klima Kontrolü ve Bakımı
+  '18009': '1806001', // Aydınlatma Kontrolü
+  '18021': '1804002', // Lastik Kontrolü ve Değişimi
+  '18022': '1810001', // Elektrikli & Hibrit Araç Kontrolü
+  '18023': '1811001', // ADAS Kalibrasyonu (Gelişmiş Sürücü Destek Sistemleri)
+  '18024': '1812001', // Şanzıman Yağ Değişimi
+  '18025': '1813001', // Elektronik Arıza Tespiti
+  '18026': '1813002', // Güvenlik Sistemleri Kontrolü
+  '18034': '1807001'  // Akü Kontrolü
+};
+
+export const CODE_7_TO_5_MAP: Record<string, string> = Object.entries(CODE_5_TO_7_MAP).reduce(
+  (acc, [k5, k7]) => {
+    acc[k7] = k5;
+    return acc;
+  },
+  {} as Record<string, string>
+);
+
+/**
  * Executes the complete BCS Service Pricing & Availability Analysis pipeline
  */
 export function executeSPOSPRPipeline(params: {
@@ -360,13 +401,14 @@ export function executeSPOSPRPipeline(params: {
 
   // 1. Determine Columns in SPO & SPR
   const spoCustomerIdCol = customConfig?.spoCustomerIdCol ||
-    findColumn(spoSheet.headers, ['CUSTOMERID', 'Müşteri No', 'MusteriNo', 'CustomerID', 'Dissap', 'Col_C'], 2) ||
+    findColumn(spoSheet.headers, ['CUSTOMERID', 'Müşteri No', 'MusteriNo', 'CustomerID', 'Dissap', 'Cari', 'Cari No', 'Col_C'], 2) ||
     'CUSTOMERID';
 
-  const spoDateCol = findColumn(spoSheet.headers, ['crm create date', 'crm_create_date', 'Tarih', 'Giriş Tarihi', 'Col_E'], 4) ||
+  const spoDateCol = findColumn(spoSheet.headers, ['crm create date', 'crm_create_date', 'Tarih', 'Giriş Tarihi', 'Col_D', 'Col_E'], 3) ||
     'crm create date';
 
-  const spoOnlineCol = findColumn(spoSheet.headers, ['SPO_ONLINEBOOKING', 'ONLINEBOOKING', 'Online Booking', 'Col_K'], 10) ||
+  // Online booking is strictly in metadata columns (columns A-J, indices 0-9 in SPO; NEVER column index >= 10 which is Column K!)
+  const spoOnlineCol = findColumn(spoSheet.headers, ['SPO_ONLINEBOOKING', 'ONLINEBOOKING', 'Online Booking', 'Col_J', 'Col_I'], 9) ||
     'SPO_ONLINEBOOKING';
 
   const sprCustomerIdCol = customConfig?.sprCustomerIdCol ||
@@ -374,7 +416,7 @@ export function executeSPOSPRPipeline(params: {
     'CUSTOMERID';
 
   const sprClaimedCol = customConfig?.sprClaimedCol ||
-    findColumn(sprSheet.headers, ['CLAIMED', 'Claimed', 'claimed', 'İtiraz', 'Col_I'], 8) ||
+    findColumn(sprSheet.headers, ['CLAIMED', 'Claimed', 'claimed', 'İtiraz', 'Col_K', 'Col_I'], 10) ||
     'CLAIMED';
 
   const sprDeleteCandidateCol = customConfig?.sprDeleteCol ||
@@ -382,120 +424,94 @@ export function executeSPOSPRPipeline(params: {
     'DELETECANDIDATE';
 
   // 2. Identify Non-Service / Metadata Headers to Filter Out
-  const metadataLower = new Set([
-    'tenant', 'spo_tenant', 'tenantid', 'tenant_id',
-    'spo_id', 'spoid', 'id', '_id', 'sıra', 'sira', 'no',
-    'spo_name', 'sponame',
-    'spo_onlinebooking_lastmodified', 'onlinebooking_lastmodified', 'spo_online_booking_lastmodified', 'online_booking_lastmodified',
-    'spo_lastmodified', 'lastmodified', 'last_modified', 'modified', 'modified_date', 'last_modified_date',
-    'spo_externaldata', 'spo_external_data', 'externaldata', 'external_data', 'spo_externalid', 'externalid', 'external_id',
-    'spo_externaldatasource', 'spo_external_data_source', 'externaldatasource', 'external_data_source', 'datasource', 'data_source', 'source',
-    'spo_created', 'created', 'created_date', 'create_date', 'spo_created_date',
-    'customerid', 'musterino', 'müşteri no', 'dissap', 'cari', 'cari kodu', 'cari no',
-    'crm create date', 'crm_create_date', 'tarih', 'kayit tarihi', 'kayıt tarihi', 'giris tarihi', 'giriş tarihi',
-    'spo_onlinebooking', 'onlinebooking', 'online booking', 'online randevu', 'online',
-    'spo_timezoneid', 'spo_timezone', 'timezoneid', 'timezone', 'time_zone',
-    'spo_emails', 'spo_email', 'emails', 'email', 'eposta', 'e-posta', 'mail',
-    'spo_phone', 'spo_phonenumber', 'phone', 'telefon', 'tel', 'fax',
-    'spo_address', 'address', 'adres', 'zip', 'postal', 'postakodu',
-    'spo_status', 'status', 'type', 'spo_type', 'description', 'açıklama', 'aciklama',
-    'spo_url', 'url', 'website', 'web', 'spo_notes', 'note', 'notes', 'notlar',
-    'claimed', 'itiraz', 'deletecandidate', 'delete_candidate', 'silme adayi', 'silme adayı',
-    'bölge yöneticisi', 'bolge yoneticisi', 'bölge', 'bolge', 'saha', 'saha sorumlusu', 'müşteri ilişkileri',
-    'il', 'ilce', 'ilçe', 'şehir', 'sehir', 'firma', 'firma (tabela)', 'tabela', 'bcs', 'şube', 'sube', 'şube adı',
-    'col_a', 'col_b', 'col_c', 'col_d', 'col_e', 'col_f', 'col_g', 'col_h', 'col_i', 'col_j'
+  const normalizeHeaderKey = (str: string): string => {
+    return cleanTurkishText(str).toLowerCase().replace(/[\s\-_()]/g, '');
+  };
+
+  const metadataNormalized = new Set([
+    'tenant', 'spotenant', 'tenantid',
+    'spoid', 'id', 'sira', 'no',
+    'sponame',
+    'spoonlinebookinglastmodified', 'onlinebookinglastmodified',
+    'spolastmodified', 'lastmodified', 'modified', 'modifieddate', 'lastmodifieddate',
+    'spoexternaldata', 'externaldata', 'spoexternalid', 'externalid',
+    'spoexternaldatasource', 'externaldatasource', 'datasource', 'source',
+    'spocreated', 'created', 'createddate', 'spocreateddate',
+    'customerid', 'musterino', 'dissap', 'cari', 'carikodu', 'carino',
+    'crmcreatedate', 'tarih', 'kayittarihi', 'giristarihi',
+    'spoonlinebooking', 'onlinebooking', 'onlinerandevu', 'online',
+    'spotimezoneid', 'spotimezone', 'timezoneid', 'timezone',
+    'spoemails', 'spoemail', 'emails', 'email', 'eposta', 'mail',
+    'spophone', 'spophonenumber', 'phone', 'telefon', 'tel', 'fax',
+    'spoaddress', 'address', 'adres', 'zip', 'postal', 'postakodu',
+    'spostatus', 'status', 'type', 'spotype', 'description', 'aciklama',
+    'spourl', 'url', 'website', 'web', 'sponotes', 'note', 'notes', 'notlar',
+    'claimed', 'itiraz', 'deletecandidate', 'silmeadayi',
+    'bolgeyoneticisi', 'bolge', 'saha', 'sahasorumlusu', 'musteriiliskileri',
+    'il', 'ilce', 'sehir', 'firma', 'firmatabela', 'tabela', 'bcs', 'sube', 'subeadi',
+    'cola', 'colb', 'colc', 'cold', 'cole', 'colf', 'colg', 'colh', 'coli', 'colj'
   ]);
 
   const isMetadataHeader = (h: string): boolean => {
+    if (!h) return true;
     const raw = String(h).trim();
-    const clean = raw.toLowerCase().replace(/[\s\-_]/g, '');
-    if (!clean) return true;
-    if (clean.startsWith('__empty')) return true;
-    if (metadataLower.has(clean) || metadataLower.has(raw.toLowerCase())) return true;
-    if (clean.includes('externaldata') || clean.includes('externalid') || clean.includes('datasource') || clean.includes('lastmodified') || clean.includes('createddate') || clean.includes('tenant') || clean.includes('spoid') || clean.includes('sponame') || clean.includes('timezone')) return true;
-    if (clean === 'claimed' || clean.includes('claimed') || clean === 'itiraz' || clean.includes('itiraz')) return true;
-    if (clean === 'deletecandidate' || clean.includes('deletecandidate') || clean.includes('delete_candidate') || clean.includes('silmeaday')) return true;
+    if (!raw) return true;
+
+    // 18xxxxx Service codes are ALWAYS service columns, NEVER metadata!
+    const digits = raw.replace(/\D/g, '');
+    if (digits.startsWith('18') && digits.length >= 4) return false;
+
+    const norm = normalizeHeaderKey(raw);
+    if (!norm) return true;
+    if (norm.startsWith('empty') || norm.startsWith('__empty')) return true;
+    if (metadataNormalized.has(norm)) return true;
+
+    if (norm.includes('externaldata') || norm.includes('externalid') || norm.includes('datasource') || norm.includes('lastmodified') || norm.includes('createddate') || norm.includes('tenant') || norm.includes('spoid') || norm.includes('sponame') || norm.includes('timezone')) return true;
+    if (norm === 'claimed' || norm.includes('claimed') || norm === 'itiraz') return true;
+    if (norm === 'deletecandidate' || norm.includes('deletecandidate') || norm.includes('silmeadayi')) return true;
     if (h === sprClaimedCol || h === sprDeleteCandidateCol || h === sprCustomerIdCol || h === spoCustomerIdCol || h === spoDateCol || h === spoOnlineCol) return true;
+
     return false;
   };
 
-  // Extract Services from SPO Sheet (Columns K to AA: index 10 to 26 inclusive)
+  // Extract Services from SPO Sheet: Columns K to AA (index 10 to 26 inclusive = 17 services)
+  // Kullanıcı kuralı: "spo sayfasında K sütunundan başlayıp AA sütununa kadar AA da dahil olmak üzere hizmetler burada oluyor"
   const spoKToAaHeaders: string[] = [];
   if (spoSheet.headers && spoSheet.headers.length > 10) {
     const endIndex = Math.min(27, spoSheet.headers.length);
     for (let i = 10; i < endIndex; i++) {
       const h = spoSheet.headers[i];
-      if (h && String(h).trim() !== '' && !isMetadataHeader(h)) {
+      if (h !== undefined && h !== null && String(h).trim() !== '' && !isMetadataHeader(h)) {
         spoKToAaHeaders.push(h);
       }
     }
   }
 
-  // Extract all other non-metadata service headers from SPO Sheet
-  const spoServiceHeaders = spoSheet.headers.filter((h) => {
-    if (isMetadataHeader(h)) return false;
-
-    const raw = String(h).trim();
-    const clean = raw.toLowerCase();
-
-    // Pattern-based exclusions for SPO system metadata
-    if (clean.includes('lastmodified') || clean.includes('last_modified')) return false;
-    if (clean === 'tenant' || clean.includes('_tenant') || clean.startsWith('tenant_')) return false;
-    if (clean.includes('externaldata') || clean.includes('external_data') || clean.includes('externalid')) return false;
-    if (clean === 'spo_id' || clean === 'spoid' || clean === 'spo_name' || clean === 'sponame') return false;
-    if (clean.includes('onlinebooking') || clean.includes('online_booking')) return false;
-    if (clean.includes('timezone') || clean.includes('time_zone')) return false;
-    if (clean.includes('email') || clean.includes('eposta') || clean.includes('e-posta') || clean.includes('mail')) return false;
-    if (clean.includes('phone') || clean.includes('telefon') || clean.includes('fax')) return false;
-    if (clean.includes('address') || clean.includes('adres')) return false;
-    if (clean.includes('website') || clean.includes('url')) return false;
-    if (clean.includes('latitude') || clean.includes('longitude') || clean.includes('location')) return false;
-    if (clean.includes('description') || clean.includes('aciklama') || clean.includes('açıklama')) return false;
-    if (clean.includes('status') || clean.includes('durum')) return false;
-    if (clean.includes('note') || clean.includes('notlar')) return false;
-
-    return true;
+  // Any other columns containing 18xxxxx codes anywhere in SPO sheet:
+  const spo18CodeHeaders = (spoSheet.headers || []).filter((h) => {
+    if (!h) return false;
+    const digits = String(h).replace(/\D/g, '');
+    return digits.startsWith('18') && digits.length >= 4;
   });
 
-  // Extract Services from SPR Sheet (Columns K to AA) as secondary reference
-  const sprServiceHeaders: string[] = [];
-  if (sprSheet.headers && sprSheet.headers.length > 10) {
-    const endIndex = Math.min(27, sprSheet.headers.length);
-    for (let i = 10; i < endIndex; i++) {
-      const h = sprSheet.headers[i];
-      if (h && String(h).trim() !== '' && !isMetadataHeader(h)) {
-        sprServiceHeaders.push(h);
-      }
-    }
-  }
-
-  // Effective Service Columns: SPO Columns K through AA take top priority!
+  // Effective Service Columns: Combine SPO K..AA and 18-codes without duplicates
   let serviceColumns: string[] = [];
-  if (spoKToAaHeaders.length > 0) {
-    serviceColumns = [...spoKToAaHeaders];
-    for (const h of spoServiceHeaders) {
-      if (!serviceColumns.includes(h)) {
-        serviceColumns.push(h);
-      }
-    }
-    for (const h of sprServiceHeaders) {
-      if (!serviceColumns.includes(h)) {
-        serviceColumns.push(h);
-      }
-    }
-  } else if (spoServiceHeaders.length > 0) {
-    serviceColumns = [...spoServiceHeaders];
-    for (const h of sprServiceHeaders) {
-      if (!serviceColumns.includes(h)) {
-        serviceColumns.push(h);
-      }
-    }
-  } else {
-    serviceColumns = sprServiceHeaders;
-  }
+  spoKToAaHeaders.forEach((h) => {
+    if (!serviceColumns.includes(h)) serviceColumns.push(h);
+  });
+  spo18CodeHeaders.forEach((h) => {
+    if (!serviceColumns.includes(h)) serviceColumns.push(h);
+  });
 
-  // Final strict filter: ensure no claimed/deletecandidate/metadata header is included as a service
-  serviceColumns = serviceColumns.filter((col) => !isMetadataHeader(col));
+  // Fallback ONLY if spoSheet has no service columns at all (e.g. malformed or empty sheet)
+  if (serviceColumns.length === 0 && sprSheet.headers && sprSheet.headers.length > 0) {
+    sprSheet.headers.forEach((h) => {
+      const digits = String(h).replace(/\D/g, '');
+      if ((digits.startsWith('18') && digits.length >= 4) || (!isMetadataHeader(h) && sprSheet.headers.indexOf(h) >= 10)) {
+        if (!serviceColumns.includes(h)) serviceColumns.push(h);
+      }
+    });
+  }
 
   // 3. Index SPR Sheet by CUSTOMERID
   const sprLookupMap = new Map<string, { claimed: string; deleteCandidate: string; rawRow: Record<string, any> }>();
@@ -527,63 +543,119 @@ export function executeSPOSPRPipeline(params: {
     }
   }
 
-  // 5. Index 18xxxxx Services (Combine default catalog with user uploaded services)
+  // 5. Index 18xxxxx Services (Combine default catalog with user uploaded/edited services)
   const service18xMap = new Map<string, Service18xItem>();
-  
+  const service18xByCode = new Map<string, Service18xItem>();
+
+  const registerService18x = (s: Service18xItem) => {
+    if (!s) return;
+    const rawCode = String(s.serviceCode || '').trim();
+    const digits = rawCode.replace(/\D/g, '');
+    const cleanName = String(s.serviceName || '').trim();
+
+    if (rawCode) {
+      service18xMap.set(rawCode.toLowerCase(), s);
+      service18xByCode.set(rawCode.toLowerCase(), s);
+    }
+    if (digits) {
+      service18xMap.set(digits, s);
+      service18xByCode.set(digits, s);
+
+      // Cross map 5-digit <-> 7-digit equivalents
+      const eq7 = CODE_5_TO_7_MAP[digits];
+      if (eq7 && !service18xByCode.has(eq7)) {
+        service18xByCode.set(eq7, s);
+      }
+      const eq5 = CODE_7_TO_5_MAP[digits];
+      if (eq5 && !service18xByCode.has(eq5)) {
+        service18xByCode.set(eq5, s);
+      }
+    }
+    if (cleanName) {
+      service18xMap.set(cleanName.toLowerCase(), s);
+      const cleanTr = cleanTurkishText(cleanName).toLowerCase();
+      if (cleanTr) service18xMap.set(cleanTr, s);
+    }
+  };
+
   // First load default 18x services (5-digit and 7-digit)
   for (const s of DEFAULT_18X_SERVICES) {
-    if (s.serviceCode) {
-      service18xMap.set(s.serviceCode.toLowerCase().trim(), s);
-      const digits = s.serviceCode.replace(/\D/g, '');
-      if (digits) service18xMap.set(digits, s);
-    }
-    if (s.serviceName) {
-      service18xMap.set(s.serviceName.toLowerCase().trim(), s);
-    }
+    registerService18x(s);
   }
 
-  // Then override/extend with user-uploaded services
+  // Then override/extend with user-uploaded or user-edited services
   for (const s of service18xList) {
-    if (s.serviceCode) {
-      service18xMap.set(s.serviceCode.toLowerCase().trim(), s);
-      const digits = s.serviceCode.replace(/\D/g, '');
-      if (digits) service18xMap.set(digits, s);
-    }
-    if (s.serviceName) {
-      service18xMap.set(s.serviceName.toLowerCase().trim(), s);
-    }
+    registerService18x(s);
   }
 
   // Helper to resolve service metadata from column header
   const resolveServiceMeta = (rawCol: string): ServiceColumnMeta => {
     const raw = String(rawCol).trim();
-    const lower = raw.toLowerCase();
-    const digits = raw.replace(/\D/g, '');
+    // Normalize Excel numeric formatting (e.g. "18001.0" -> "18001")
+    const cleanRaw = raw.replace(/\.0+$/, '').trim();
+    const lower = cleanRaw.toLowerCase();
 
-    // Check if raw header is a generic placeholder (like "Col_K", "__EMPTY_10", "Column 12")
-    const isGenericHeader = 
+    // Extract digits and 18xxxxx pattern if present
+    const digits = cleanRaw.replace(/\D/g, '');
+    const match18 = cleanRaw.match(/\b(18\d{3,7})\b/) || cleanRaw.match(/18\d{3,7}/);
+    const code18 = match18 ? match18[0] : (digits.startsWith('18') && digits.length >= 5 ? digits : '');
+
+    // Is this header an anonymous Excel placeholder? (Col_K, __EMPTY_10, etc.)
+    // Note: NEVER treat an 18xxxxx code as a generic header!
+    const isGenericHeader = !code18 && (
       lower.startsWith('col_') || 
       lower.startsWith('col') || 
       lower.startsWith('__empty') || 
       lower.startsWith('sütun') || 
-      lower.startsWith('column');
+      lower.startsWith('column')
+    );
 
-    // Position-based mapping ONLY for generic placeholder headers in SPR columns K to AA (index 10 to 26)
-    const sprIndex = sprSheet.headers ? sprSheet.headers.indexOf(rawCol) : -1;
+    // Position-based mapping for SPO Sheet: Columns K to AA (index 10 to 26 inclusive = 17 services)
+    // Sütun K (10) -> SPO_K_TO_AA_SERVICES[0] (18000 Genel Randevu)
+    // Sütun L (11) -> SPO_K_TO_AA_SERVICES[1] (18001 Periyodik Bakım)
+    // ...
+    // Sütun AA (26) -> SPO_K_TO_AA_SERVICES[16] (18034 Akü Kontrolü)
+    const spoIndex = spoSheet.headers ? spoSheet.headers.indexOf(rawCol) : -1;
     let positionService: Service18xItem | undefined = undefined;
-    if (isGenericHeader && sprIndex >= 10 && sprIndex <= 26) {
-      const stdIdx = (sprIndex - 10) + 1; // Column K maps to STANDARD_BCS_SERVICES[1]
-      if (stdIdx < STANDARD_BCS_SERVICES.length) {
-        const stdName = STANDARD_BCS_SERVICES[stdIdx];
-        positionService = service18xMap.get(stdName.toLowerCase()) || 
-                          DEFAULT_18X_SERVICES.find((s) => s.serviceName === stdName);
+    if (spoIndex >= 10 && spoIndex <= 26) {
+      const spoOffset = spoIndex - 10;
+      if (spoOffset >= 0 && spoOffset < SPO_K_TO_AA_SERVICES.length) {
+        positionService = SPO_K_TO_AA_SERVICES[spoOffset];
+      }
+    } else if (spoIndex === -1 && sprSheet.headers) {
+      const sprIndex = sprSheet.headers.indexOf(rawCol);
+      if (sprIndex >= 10 && sprIndex <= 26) {
+        const sprOffset = sprIndex - 10;
+        if (sprOffset >= 0 && sprOffset < SPO_K_TO_AA_SERVICES.length) {
+          positionService = SPO_K_TO_AA_SERVICES[sprOffset];
+        }
       }
     }
 
-    // Direct match by code or name
-    let found = service18xMap.get(lower) || (digits ? service18xMap.get(digits) : undefined);
+    // 1. Direct match by 18-code in catalog
+    let found = (code18 ? service18xByCode.get(code18.toLowerCase()) : undefined) ||
+                (digits ? service18xByCode.get(digits) : undefined) ||
+                service18xMap.get(lower);
 
-    // Fuzzy match by code digits
+    // 2. Cross-map 5-digit <-> 7-digit equivalents
+    if (!found && code18) {
+      const eq7 = CODE_5_TO_7_MAP[code18];
+      if (eq7) found = service18xByCode.get(eq7);
+      if (!found) {
+        const eq5 = CODE_7_TO_5_MAP[code18];
+        if (eq5) found = service18xByCode.get(eq5);
+      }
+    }
+
+    // 3. Match by normalized Turkish text
+    if (!found) {
+      const normTurkish = cleanTurkishText(cleanRaw).toLowerCase();
+      if (normTurkish) {
+        found = service18xMap.get(normTurkish);
+      }
+    }
+
+    // 4. Fuzzy match across registered items by serviceCode digits
     if (!found && digits) {
       for (const [, item] of service18xMap.entries()) {
         const itemDigits = item.serviceCode ? item.serviceCode.replace(/\D/g, '') : '';
@@ -594,21 +666,31 @@ export function executeSPOSPRPipeline(params: {
       }
     }
 
-    // Fallback to position-based service if name is generic (like "Col_K" or "__EMPTY_10")
-    if (!found && positionService) {
-      found = positionService;
-    }
-
+    // If item matched from user catalog or default 18x list:
     if (found) {
       return {
         rawKey: raw,
-        serviceCode: found.serviceCode || digits || raw,
+        serviceCode: found.serviceCode || code18 || digits || cleanRaw,
         serviceName: found.serviceName,
         displayName: found.serviceName,
-        category: found.serviceCategory
+        category: found.serviceCategory || '18xxxxx Hizmetler'
       };
     }
 
+    // USER EXPLICIT RULE: "Elinizdeki listede bulunmayan bir 18 li kod gelirse nasıl davranılsın? -> Hizmet kodu doğrudan başlık olarak korunsun"
+    // Keep the service code itself as title, NEVER apply generic position fallback!
+    if (code18 || (digits.startsWith('18') && digits.length >= 4)) {
+      const fallbackCode = code18 || digits || cleanRaw;
+      return {
+        rawKey: raw,
+        serviceCode: fallbackCode,
+        serviceName: fallbackCode,
+        displayName: fallbackCode,
+        category: '18xxxxx Hizmetler'
+      };
+    }
+
+    // Fallback to position-based service only for anonymous placeholders (Col_K, __EMPTY_10)
     if (positionService) {
       return {
         rawKey: raw,
@@ -621,9 +703,9 @@ export function executeSPOSPRPipeline(params: {
 
     return {
       rawKey: raw,
-      serviceCode: digits || raw,
-      serviceName: raw,
-      displayName: raw,
+      serviceCode: digits || cleanRaw,
+      serviceName: cleanRaw,
+      displayName: cleanRaw,
       category: 'Diğer Hizmetler'
     };
   };
@@ -750,23 +832,41 @@ export function executeSPOSPRPipeline(params: {
     const pricesInRow: number[] = [];
 
     serviceColumns.forEach((svcCol) => {
-      // 1. Primary lookup: Check SPO sheet for this CUSTOMERID (Services and pricing are in Columns K to AA in SPO)
+      const meta = serviceColumnMeta[svcCol];
+      // 1. Primary lookup: Check SPO sheet for this CUSTOMERID by exact svcCol header
       let rawCellVal: any = spoRow[svcCol];
 
-      // 2. Lookup by column index if spoSheet has this column between index 10 and 26
+      // 2. Lookup by serviceCode or serviceName in spoRow if available
+      if ((rawCellVal === undefined || rawCellVal === null || String(rawCellVal).trim() === '') && meta) {
+        if (meta.serviceCode && spoRow[meta.serviceCode] !== undefined) {
+          rawCellVal = spoRow[meta.serviceCode];
+        } else if (meta.serviceName && spoRow[meta.serviceName] !== undefined) {
+          rawCellVal = spoRow[meta.serviceName];
+        }
+      }
+
+      // 3. Lookup by column index in SPO sheet (Columns K to AA: index 10 to 26)
       if (rawCellVal === undefined || rawCellVal === null || String(rawCellVal).trim() === '') {
         const colIdx = spoSheet.headers ? spoSheet.headers.indexOf(svcCol) : -1;
         if (colIdx >= 10 && colIdx <= 26) {
-          const spoKeys = Object.keys(spoRow);
-          if (spoKeys[colIdx] !== undefined) {
-            rawCellVal = spoRow[spoKeys[colIdx]];
+          const headerAtIdx = spoSheet.headers[colIdx];
+          if (headerAtIdx && spoRow[headerAtIdx] !== undefined) {
+            rawCellVal = spoRow[headerAtIdx];
+          }
+          if (rawCellVal === undefined || rawCellVal === null || String(rawCellVal).trim() === '') {
+            const spoKeys = Object.keys(spoRow);
+            if (spoKeys[colIdx] !== undefined) {
+              rawCellVal = spoRow[spoKeys[colIdx]];
+            }
           }
         }
       }
 
-      // 3. Fallback: Check SPR sheet
+      // 4. Fallback: Check SPR sheet
       if ((rawCellVal === undefined || rawCellVal === null || String(rawCellVal).trim() === '') && sprData?.rawRow) {
         rawCellVal = sprData.rawRow[svcCol];
+        if (rawCellVal === undefined && meta?.serviceCode) rawCellVal = sprData.rawRow[meta.serviceCode];
+        if (rawCellVal === undefined && meta?.serviceName) rawCellVal = sprData.rawRow[meta.serviceName];
         if (rawCellVal === undefined || rawCellVal === null || String(rawCellVal).trim() === '') {
           const colIdx = sprSheet.headers ? sprSheet.headers.indexOf(svcCol) : -1;
           if (colIdx >= 10 && colIdx <= 26) {
@@ -892,7 +992,7 @@ export function executeSPOSPRPipeline(params: {
     let offeredYes = 0;
     let free = 0;
     const prices: number[] = [];
-    const offeringDealers: { firmName: string; city: string; manager: string; priceText: string; priceNum: number | null; status: string }[] = [];
+    const offeringDealers: { firmName: string; city: string; manager: string; priceText: string; priceNum: number | null; status: string; customerId?: string }[] = [];
 
     activeRows.forEach((r) => {
       const statusObj = r.serviceStatuses[sName] || { status: 'NOT_OFFERED', displayValue: 'HAYIR', priceNumeric: null };
@@ -910,18 +1010,19 @@ export function executeSPOSPRPipeline(params: {
         } else if (statusObj.status === 'OFFERED_YES') {
           offeredYes++;
         }
-
-        offeringDealers.push({
-          firmName: r.bcsFirmName,
-          city: r.city,
-          manager: r.regionManager,
-          priceText: statusObj.displayValue,
-          priceNum: statusObj.priceNumeric,
-          status: statusObj.status
-        });
       } else {
         notOffered++;
       }
+
+      offeringDealers.push({
+        firmName: r.bcsFirmName,
+        city: r.city,
+        manager: r.regionManager,
+        priceText: statusObj.displayValue,
+        priceNum: statusObj.priceNumeric,
+        status: statusObj.status,
+        customerId: r.customerId
+      });
     });
 
     // Calculate accurate prices: only positive paid prices should form market min, max, avg, and median
@@ -955,8 +1056,17 @@ export function executeSPOSPRPipeline(params: {
       priceVariancePct = Math.round(((avgP - catalogRefPrice) / catalogRefPrice) * 1000) / 10;
     }
 
-    // Sort offering dealers: Priced dealers first (lowest to highest), then 0 TL free, then NOPRICE, then EVET
+    // Sort offering dealers: Priced/Free first, then No Price / Offered Yes, then Not Offered
     const sortedDealers = [...offeringDealers].sort((a, b) => {
+      const rank = (status: string) => {
+        if (status === 'PRICED' || status === 'FREE') return 1;
+        if (status === 'NO_PRICE' || status === 'OFFERED_YES') return 2;
+        return 3;
+      };
+      const rA = rank(a.status);
+      const rB = rank(b.status);
+      if (rA !== rB) return rA - rB;
+
       if (a.priceNum !== null && b.priceNum !== null) {
         return a.priceNum - b.priceNum;
       }
@@ -1051,16 +1161,24 @@ export function executeSPOSPRPipeline(params: {
 }
 
 function findColumn(headers: string[], candidates: string[], fallbackIndex: number): string | undefined {
+  if (!headers || headers.length === 0) return undefined;
   for (const cand of candidates) {
-    const found = headers.find((h) => h.toLowerCase() === cand.toLowerCase());
+    const found = headers.find((h) => h && h.toLowerCase() === cand.toLowerCase());
     if (found) return found;
   }
   for (const cand of candidates) {
-    const found = headers.find((h) => h.toLowerCase().includes(cand.toLowerCase()));
+    const found = headers.find((h) => h && h.toLowerCase().includes(cand.toLowerCase()));
     if (found) return found;
   }
-  if (headers[fallbackIndex]) {
-    return headers[fallbackIndex];
+  if (fallbackIndex >= 0 && fallbackIndex < headers.length) {
+    const fallback = headers[fallbackIndex];
+    if (fallback) {
+      const digits = String(fallback).replace(/\D/g, '');
+      // Never fallback to an 18-service column for metadata!
+      if (!digits.startsWith('18')) {
+        return fallback;
+      }
+    }
   }
   return undefined;
 }

@@ -24,13 +24,15 @@ interface ExportSettingsModalProps {
   onClose: () => void;
   summary: BCSMatrixSummary;
   sourceFileName?: string;
+  canViewPricing?: boolean;
 }
 
 export const ExportSettingsModal: React.FC<ExportSettingsModalProps> = ({
   isOpen,
   onClose,
   summary,
-  sourceFileName
+  sourceFileName,
+  canViewPricing = true
 }) => {
   const [options, setOptions] = useState<ExportOptions>(() => {
     try {
@@ -128,6 +130,7 @@ export const ExportSettingsModal: React.FC<ExportSettingsModalProps> = ({
         summary,
         fileName,
         sourceFileName,
+        canViewPricing,
         options: {
           ...options,
           selectedCategories
