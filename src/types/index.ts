@@ -113,7 +113,17 @@ export interface ServiceAnalysisItem {
   medianPrice?: number;            // Medyan fiyat
   priceVariancePct?: number;       // Katalog fiyatına göre % sapma
   pricingCoverageRate: number;     // % of offerings with price
-  offeringDealers: { firmName: string; city: string; manager: string; priceText: string; priceNum: number | null; status: string; customerId?: string }[];
+  offeringDealers: { 
+    firmName: string; 
+    city: string; 
+    manager: string; 
+    priceText: string; 
+    priceNum: number | null; 
+    status: string; 
+    customerId?: string;
+    claimed?: string;
+    spoOnlineBooking?: string;
+  }[];
 }
 
 export interface ExportColumnOptions {

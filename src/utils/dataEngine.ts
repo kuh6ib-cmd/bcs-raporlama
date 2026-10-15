@@ -184,6 +184,8 @@ export function formatExcelDate(val: any): string {
 
 export function convertToTurkishBoolean(val: any): string {
   if (val === undefined || val === null) return 'HAYIR';
+  if (typeof val === 'boolean') return val ? 'EVET' : 'HAYIR';
+  if (typeof val === 'number') return val > 0 ? 'EVET' : 'HAYIR';
   const str = String(val).trim().toUpperCase();
 
   if (
@@ -193,24 +195,18 @@ export function convertToTurkishBoolean(val: any): string {
     str === 'EVET' || 
     str === '1' || 
     str === 'YES' || 
-    str === 'Y'
+    str === 'Y' ||
+    str === 'AKTİF' ||
+    str === 'AKTIF' ||
+    str === 'ONLINE' ||
+    str === 'ON-LINE' ||
+    str === 'KAYITLI' ||
+    str === 'VAR'
   ) {
     return 'EVET';
   }
 
-  if (
-    str === 'YANLIŞ' || 
-    str === 'YANLIS' || 
-    str === 'FALSE' || 
-    str === 'HAYIR' || 
-    str === '0' || 
-    str === 'NO' || 
-    str === 'N'
-  ) {
-    return 'HAYIR';
-  }
-
-  return val ? String(val).toUpperCase() : 'HAYIR';
+  return 'HAYIR';
 }
 
 export function parsePriceValue(val: any): ServicePriceStatus {
@@ -517,12 +513,58 @@ export function executeSPOSPRPipeline(params: {
   const sprLookupMap = new Map<string, { claimed: string; deleteCandidate: string; rawRow: Record<string, any> }>();
 
   for (const sprRow of sprSheet.rows) {
-    const rawCustId = sprRow[sprCustomerIdCol];
+    let rawCustId = sprRow[sprCustomerIdCol];
+    if (rawCustId === undefined || rawCustId === '') {
+      for (const k of Object.keys(sprRow)) {
+        const normK = cleanTurkishText(k).toLowerCase().replace(/[\s\-_()]/g, '');
+        if (normK === 'customerid' || normK === 'dissap' || normK === 'musterino' || normK === 'carino' || normK === 'cari') {
+          rawCustId = sprRow[k];
+          break;
+        }
+      }
+    }
+    if ((rawCustId === undefined || rawCustId === '') && sprSheet.headers && sprSheet.headers.length > 2) {
+      rawCustId = sprRow[sprSheet.headers[2]];
+    }
+
     const custId = normalizeCustomerId(rawCustId);
     if (!custId) continue;
 
-    const rawClaimed = sprRow[sprClaimedCol];
-    const rawDelete = sprRow[sprDeleteCandidateCol];
+    // Resolve rawClaimed with multiple strategies: Column K (index 10 in SPR sheet), explicit header, or normalized key
+    let rawClaimed: any = sprRow[sprClaimedCol];
+    if ((rawClaimed === undefined || rawClaimed === '') && sprSheet.headers && sprSheet.headers.length > 10) {
+      const colKHeader = sprSheet.headers[10];
+      if (colKHeader && sprRow[colKHeader] !== undefined && sprRow[colKHeader] !== '') {
+        rawClaimed = sprRow[colKHeader];
+      }
+    }
+    if (rawClaimed === undefined || rawClaimed === '') {
+      for (const k of Object.keys(sprRow)) {
+        const normK = cleanTurkishText(k).toLowerCase().replace(/[\s\-_()]/g, '');
+        if (normK === 'claimed' || normK === 'kayitli' || normK === 'itiraz' || normK === 'colk' || normK === 'col_k' || normK === 'k') {
+          rawClaimed = sprRow[k];
+          break;
+        }
+      }
+    }
+
+    // Resolve deleteCandidate with multiple strategies
+    let rawDelete: any = sprRow[sprDeleteCandidateCol];
+    if ((rawDelete === undefined || rawDelete === '') && sprSheet.headers && sprSheet.headers.length > 9) {
+      const colJHeader = sprSheet.headers[9];
+      if (colJHeader && sprRow[colJHeader] !== undefined && sprRow[colJHeader] !== '') {
+        rawDelete = sprRow[colJHeader];
+      }
+    }
+    if (rawDelete === undefined || rawDelete === '') {
+      for (const k of Object.keys(sprRow)) {
+        const normK = cleanTurkishText(k).toLowerCase().replace(/[\s\-_()]/g, '');
+        if (normK === 'deletecandidate' || normK === 'silmeadayi' || normK === 'silme') {
+          rawDelete = sprRow[k];
+          break;
+        }
+      }
+    }
 
     const claimedVal = convertToTurkishBoolean(rawClaimed);
     const deleteCandidateVal = convertToTurkishBoolean(rawDelete);
@@ -729,7 +771,19 @@ export function executeSPOSPRPipeline(params: {
   let totalNoPriceCount = 0;
 
   spoSheet.rows.forEach((spoRow, index) => {
-    const rawCustId = spoRow[spoCustomerIdCol];
+    let rawCustId = spoRow[spoCustomerIdCol];
+    if (rawCustId === undefined || rawCustId === '') {
+      for (const k of Object.keys(spoRow)) {
+        const normK = cleanTurkishText(k).toLowerCase().replace(/[\s\-_()]/g, '');
+        if (normK === 'customerid' || normK === 'dissap' || normK === 'musterino' || normK === 'carino' || normK === 'cari') {
+          rawCustId = spoRow[k];
+          break;
+        }
+      }
+    }
+    if ((rawCustId === undefined || rawCustId === '') && spoSheet.headers && spoSheet.headers.length > 2) {
+      rawCustId = spoRow[spoSheet.headers[2]];
+    }
     const custId = normalizeCustomerId(rawCustId);
 
     // Düşeyara from SPR
@@ -750,7 +804,29 @@ export function executeSPOSPRPipeline(params: {
     if (claimedVal === 'EVET') claimedYesCount++;
     else claimedNoCount++;
 
-    const rawOnline = spoRow[spoOnlineCol] || 'HAYIR';
+    // Resolve online booking value with extensive fallbacks
+    let rawOnline: any = spoRow[spoOnlineCol];
+    if ((rawOnline === undefined || rawOnline === '') && spoSheet.headers && spoSheet.headers.length > 9) {
+      const colJHeader = spoSheet.headers[9];
+      if (colJHeader && spoRow[colJHeader] !== undefined && spoRow[colJHeader] !== '') {
+        rawOnline = spoRow[colJHeader];
+      }
+      if ((rawOnline === undefined || rawOnline === '') && spoSheet.headers.length > 8) {
+        const colIHeader = spoSheet.headers[8];
+        if (colIHeader && spoRow[colIHeader] !== undefined && spoRow[colIHeader] !== '') {
+          rawOnline = spoRow[colIHeader];
+        }
+      }
+    }
+    if (rawOnline === undefined || rawOnline === '') {
+      for (const k of Object.keys(spoRow)) {
+        const normK = cleanTurkishText(k).toLowerCase().replace(/[\s\-_()]/g, '');
+        if (normK === 'spoonlinebooking' || normK === 'onlinebooking' || normK === 'onlinerandevu' || normK === 'spoonline' || normK === 'online') {
+          rawOnline = spoRow[k];
+          break;
+        }
+      }
+    }
     const onlineVal = convertToTurkishBoolean(rawOnline);
     if (onlineVal === 'EVET') onlineYesCount++;
     else onlineNoCount++;
@@ -992,7 +1068,7 @@ export function executeSPOSPRPipeline(params: {
     let offeredYes = 0;
     let free = 0;
     const prices: number[] = [];
-    const offeringDealers: { firmName: string; city: string; manager: string; priceText: string; priceNum: number | null; status: string; customerId?: string }[] = [];
+    const offeringDealers: { firmName: string; city: string; manager: string; priceText: string; priceNum: number | null; status: string; customerId?: string; claimed?: string; spoOnlineBooking?: string }[] = [];
 
     activeRows.forEach((r) => {
       const statusObj = r.serviceStatuses[sName] || { status: 'NOT_OFFERED', displayValue: 'HAYIR', priceNumeric: null };
@@ -1021,7 +1097,9 @@ export function executeSPOSPRPipeline(params: {
         priceText: statusObj.displayValue,
         priceNum: statusObj.priceNumeric,
         status: statusObj.status,
-        customerId: r.customerId
+        customerId: r.customerId,
+        claimed: r.claimed,
+        spoOnlineBooking: r.spoOnlineBooking
       });
     });
 

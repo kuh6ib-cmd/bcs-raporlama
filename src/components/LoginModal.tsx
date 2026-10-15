@@ -25,19 +25,12 @@ import {
   Link as LinkIcon
 } from 'lucide-react';
 import { UserAccount, UserRole } from '../types';
-import { 
-  sendApprovalRequestEmail, 
-  getApprovalLink,
-  getMailtoUrl, 
-  getOutlookWebUrl 
-} from '../utils/notificationEngine';
 
 interface LoginModalProps {
   accounts: UserAccount[];
   onLoginSuccess: (user: UserAccount, rememberMe: boolean) => void;
   onRegisterAccount?: (newAccount: UserAccount) => void;
   onApproveUser?: (userId: string) => void;
-  onOpenEmailModal?: () => void;
   initialTab?: 'login' | 'register';
 }
 
@@ -61,7 +54,6 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   const [regFullName, setRegFullName] = useState('');
   const [regUsername, setRegUsername] = useState('');
   const [regEmail, setRegEmail] = useState('');
-  const [regApproverEmail, setRegApproverEmail] = useState('kuh6ib@bosch.com');
   const [regPassword, setRegPassword] = useState('');
   const [regPasswordConfirm, setRegPasswordConfirm] = useState('');
   const [showRegPassword, setShowRegPassword] = useState(false);
@@ -71,13 +63,10 @@ export const LoginModal: React.FC<LoginModalProps> = ({
   // Status & Feedback States
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
-  const [pendingNoticeUser, setPendingNoticeUser] = useState<UserAccount | null>(null);
   const [rejectedNoticeUser, setRejectedNoticeUser] = useState<UserAccount | null>(null);
   const [isShaking, setIsShaking] = useState(false);
   const [linkCopied, setLinkCopied] = useState(false);
   const [showOutlookDraft, setShowOutlookDraft] = useState(false);
-
-  const pendingCount = accounts.filter((a) => a.status === 'PENDING_APPROVAL').length;
 
   const triggerShake = () => {
     setIsShaking(true);
@@ -89,7 +78,6 @@ export const LoginModal: React.FC<LoginModalProps> = ({
     e.preventDefault();
     setErrorMsg('');
     setSuccessMsg('');
-    setPendingNoticeUser(null);
     setRejectedNoticeUser(null);
 
     if (!usernameInput.trim()) {
@@ -120,11 +108,9 @@ export const LoginModal: React.FC<LoginModalProps> = ({
       return;
     }
 
-    // Check account approval status
     if (matchedUser.status === 'PENDING_APPROVAL') {
-      setPendingNoticeUser(matchedUser);
       setErrorMsg(
-        `⚠️ Bu hesap henüz ONAYLANMAMIŞTIR! Başvurunuz "${matchedUser.approverEmail || 'yönetici'}" adresine gönderildi ve onay bekliyor. Yönetici onaylayana kadar panele giriş yapamazsınız.`
+        '⚠️ Bu hesap henüz ONAY BEKLİYOR! Yönetici onayı sonrasında sisteme giriş yapabileceksiniz.'
       );
       triggerShake();
       return;
@@ -147,13 +133,11 @@ export const LoginModal: React.FC<LoginModalProps> = ({
     e.preventDefault();
     setErrorMsg('');
     setSuccessMsg('');
-    setPendingNoticeUser(null);
     setRejectedNoticeUser(null);
 
     const cleanUsername = regUsername.toLowerCase().trim().replace(/[^a-z0-9_.-]/g, '');
     const cleanFullName = regFullName.trim();
     const cleanEmail = regEmail.toLowerCase().trim();
-    const cleanApproverEmail = regApproverEmail.toLowerCase().trim();
     const cleanPass = regPassword.trim();
 
     if (!cleanFullName) {
@@ -164,12 +148,6 @@ export const LoginModal: React.FC<LoginModalProps> = ({
 
     if (!cleanEmail || !cleanEmail.includes('@') || !cleanEmail.includes('.')) {
       setErrorMsg('Lütfen geçerli bir e-posta adresi giriniz (Örn: adiniz@bosch.com).');
-      triggerShake();
-      return;
-    }
-
-    if (!cleanApproverEmail || !cleanApproverEmail.includes('@') || !cleanApproverEmail.includes('.')) {
-      setErrorMsg('Lütfen onay bilgisinin gideceği yönetici e-posta adresini giriniz (Örn: yonetici@bosch.com).');
       triggerShake();
       return;
     }
@@ -237,30 +215,24 @@ export const LoginModal: React.FC<LoginModalProps> = ({
       username: cleanUsername,
       name: cleanFullName,
       email: cleanEmail,
-      approverEmail: cleanApproverEmail,
       password: cleanPass,
       role: regRole,
       roleName,
       description: regDescription.trim() || `${cleanFullName} (${roleName}) kullanıcı hesabı`,
       permissions,
-      status: 'PENDING_APPROVAL', // Requires approval
+      status: 'PENDING_APPROVAL',
       createdAt: new Date().toISOString()
     };
-
-    // Dispatch approval notification email to specified manager
-    sendApprovalRequestEmail(newAccount, cleanApproverEmail);
 
     if (onRegisterAccount) {
       onRegisterAccount(newAccount);
     }
 
-    // Show informative feedback
     setSuccessMsg(
-      `"${cleanUsername}" hesabı oluşturuldu! Belirttiğiniz "${cleanApproverEmail}" adresine onay talebi e-postası iletildi. Yönetici onayladığı takdirde sisteme giriş yaparak çalışabileceksiniz.`
+      `"${cleanUsername}" hesabı oluşturuldu ve yönetici onayı bekleniyor durumuna alındı.`
     );
     setUsernameInput(cleanUsername);
     setPasswordInput(cleanPass);
-    setPendingNoticeUser(newAccount);
     setActiveTab('login');
   };
 
@@ -309,7 +281,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({
           <p className="text-xs text-slate-400 mt-0.5 leading-relaxed max-w-sm">
             {activeTab === 'login' 
               ? 'Hesabınızla giriş yapınız veya yeni hesap başvurusunda bulununuz.' 
-              : 'Yeni kayıt başvurusu yapınız; belirttiğiniz yönetici e-postasına onay talebi iletilir.'}
+              : 'Yeni kayıt oluşturarak hemen sisteme giriş yapabilirsiniz.'}
           </p>
         </div>
 
@@ -321,7 +293,6 @@ export const LoginModal: React.FC<LoginModalProps> = ({
               setActiveTab('login');
               setErrorMsg('');
               setSuccessMsg('');
-              setPendingNoticeUser(null);
               setRejectedNoticeUser(null);
             }}
             className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-2 ${
@@ -339,7 +310,6 @@ export const LoginModal: React.FC<LoginModalProps> = ({
               setActiveTab('register');
               setErrorMsg('');
               setSuccessMsg('');
-              setPendingNoticeUser(null);
               setRejectedNoticeUser(null);
             }}
             className={`flex-1 py-2.5 px-3 rounded-xl text-xs font-bold transition flex items-center justify-center gap-2 ${
@@ -355,175 +325,17 @@ export const LoginModal: React.FC<LoginModalProps> = ({
 
         {/* Success Alert */}
         {successMsg && (
-          <div className="mb-4 p-3 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs animate-fadeIn space-y-2">
-            <div className="flex items-start gap-2.5">
-              <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0 mt-0.5" />
-              <span className="font-medium leading-relaxed">{successMsg}</span>
-            </div>
-            {pendingNoticeUser && (
-              <div className="pt-1.5 space-y-2.5">
-                {/* Direct One-Click Approval Box */}
-                <div className="p-3 bg-slate-900/90 rounded-xl border border-amber-500/40 text-left space-y-2">
-                  <div className="flex items-center justify-between text-[11px]">
-                    <span className="font-bold text-amber-300 flex items-center gap-1.5">
-                      <Clock className="w-3.5 h-3.5 text-amber-400" />
-                      Yönetici Onay Bağlantısı (Tek Tıkla Doğrudan Onay Linki):
-                    </span>
-                    <span className="text-[10px] text-slate-400 font-mono">
-                      {pendingNoticeUser.approverEmail || 'kuh6ib@bosch.com'}
-                    </span>
-                  </div>
-
-                  <div className="p-2 bg-slate-950 rounded-lg border border-slate-800 flex items-center justify-between gap-2">
-                    <span className="text-[10px] font-mono text-cyan-300 truncate select-all">
-                      {getApprovalLink(pendingNoticeUser)}
-                    </span>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        navigator.clipboard.writeText(getApprovalLink(pendingNoticeUser));
-                        setLinkCopied(true);
-                        setTimeout(() => setLinkCopied(false), 2500);
-                      }}
-                      className="shrink-0 px-2.5 py-1 rounded bg-slate-800 hover:bg-slate-700 text-slate-200 text-[10px] font-bold border border-slate-700 flex items-center gap-1 transition"
-                    >
-                      {linkCopied ? (
-                        <>
-                          <Check className="w-3 h-3 text-emerald-400" />
-                          <span className="text-emerald-300">Kopyalandı</span>
-                        </>
-                      ) : (
-                        <>
-                          <Copy className="w-3 h-3 text-slate-400" />
-                          <span>Kopyala</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
-
-                  <div className="flex flex-wrap items-center gap-2 pt-0.5">
-                    {onApproveUser && (
-                      <button
-                        type="button"
-                        onClick={() => {
-                          onApproveUser(pendingNoticeUser.id);
-                          setSuccessMsg(`✅ "${pendingNoticeUser.name}" hesabı başarıyla ONAYLANDI! Şifreniz ile hemen giriş yapabilirsiniz.`);
-                          setPendingNoticeUser(null);
-                          setErrorMsg('');
-                        }}
-                        className="flex-1 py-2 px-3 rounded-xl bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-lg shadow-emerald-600/30 transition"
-                      >
-                        <CheckCircle2 className="w-4 h-4" />
-                        <span>Hesabı Şimdi Onayla (Yönetici Onayı Ver)</span>
-                      </button>
-                    )}
-
-                    {onOpenEmailModal && (
-                      <button
-                        type="button"
-                        onClick={onOpenEmailModal}
-                        className="py-2 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 font-semibold text-xs flex items-center gap-1.5 transition"
-                      >
-                        <Inbox className="w-3.5 h-3.5 text-amber-400" />
-                        <span>Onay Masasında Aç</span>
-                      </button>
-                    )}
-                  </div>
-
-                  <div className="pt-1 flex items-center justify-between text-[10px] text-slate-400">
-                    <span>💡 Yönetici bu linke tıkladığında başvuru otomatik onaylanır ve kullanıcı açılır.</span>
-                    <button
-                      type="button"
-                      onClick={() => setShowOutlookDraft(!showOutlookDraft)}
-                      className="text-slate-500 hover:text-slate-300 underline"
-                    >
-                      {showOutlookDraft ? 'Outlook Taslağını Gizle' : 'Outlook Taslağını Göster'}
-                    </button>
-                  </div>
-
-                  {showOutlookDraft && (
-                    <div className="pt-2 border-t border-slate-800 flex items-center gap-2">
-                      <a
-                        href={getMailtoUrl(
-                          pendingNoticeUser.approverEmail || 'kuh6ib@bosch.com',
-                          `🔔 Yeni Kullanıcı Kayıt Onay Talebi: ${pendingNoticeUser.name}`,
-                          `Sayın Yetkili (${pendingNoticeUser.approverEmail || 'kuh6ib@bosch.com'}),\n\nBCS Portal için yeni kayıt başvurusu yapılmıştır:\n• Ad Soyad: ${pendingNoticeUser.name}\n• Kullanıcı Adı: ${pendingNoticeUser.username}\n• E-Posta: ${pendingNoticeUser.email}\n• Rol: ${pendingNoticeUser.roleName}\n\n👉 TEK TIKLA DOĞRUDAN ONAYLAMAK İÇİN TIKLAYINIZ:\n${getApprovalLink(pendingNoticeUser)}\n\nLütfen onayınızı veriniz.`
-                        )}
-                        target="_blank"
-                        rel="noreferrer"
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-blue-600/80 hover:bg-blue-600 text-white text-[11px] font-semibold transition"
-                      >
-                        <Send className="w-3 h-3" />
-                        <span>Outlook İstemcisine Aktar (İsteğe Bağlı)</span>
-                      </a>
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
+          <div className="mb-4 p-3 rounded-2xl bg-emerald-500/10 border border-emerald-500/30 text-emerald-300 text-xs animate-fadeIn flex items-center gap-2.5">
+            <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />
+            <span className="font-medium leading-relaxed">{successMsg}</span>
           </div>
         )}
 
         {/* Error Alert */}
         {errorMsg && (
-          <div className="mb-4 p-3.5 rounded-2xl bg-red-500/10 border border-red-500/30 text-red-300 text-xs animate-fadeIn space-y-2">
-            <div className="flex items-start gap-2.5">
-              <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
-              <span className="font-medium leading-relaxed">{errorMsg}</span>
-            </div>
-            {pendingNoticeUser && (
-              <div className="pt-1 flex flex-wrap items-center gap-2">
-                {onApproveUser && (
-                  <button
-                    type="button"
-                    onClick={() => {
-                      onApproveUser(pendingNoticeUser.id);
-                      setSuccessMsg(`✅ "${pendingNoticeUser.name}" hesabı onaylandı! Şimdi giriş yapabilirsiniz.`);
-                      setPendingNoticeUser(null);
-                      setErrorMsg('');
-                    }}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white text-[11px] font-bold shadow-sm transition"
-                  >
-                    <CheckCircle2 className="w-3.5 h-3.5" />
-                    <span>Yönetici Olarak Şimdi Onayla</span>
-                  </button>
-                )}
-                <button
-                  type="button"
-                  onClick={() => {
-                    navigator.clipboard.writeText(getApprovalLink(pendingNoticeUser));
-                    setLinkCopied(true);
-                    setTimeout(() => setLinkCopied(false), 2500);
-                  }}
-                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-[11px] font-medium transition"
-                >
-                  <Copy className="w-3.5 h-3.5 text-slate-400" />
-                  <span>{linkCopied ? 'Onay Linki Kopyalandı' : 'Onay Linkini Kopyala'}</span>
-                </button>
-                {onOpenEmailModal && (
-                  <button
-                    type="button"
-                    onClick={onOpenEmailModal}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-[11px] font-medium transition"
-                  >
-                    <Inbox className="w-3.5 h-3.5 text-amber-400" />
-                    <span>Onay Masasında İncele</span>
-                  </button>
-                )}
-              </div>
-            )}
-            {rejectedNoticeUser && onOpenEmailModal && (
-              <div className="pt-1">
-                <button
-                  type="button"
-                  onClick={onOpenEmailModal}
-                  className="inline-flex items-center gap-1.5 px-3 py-1 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-[11px] font-bold shadow-sm transition"
-                >
-                  <Inbox className="w-3.5 h-3.5" />
-                  <span>Onay Masası &amp; E-Postaları İncele</span>
-                </button>
-              </div>
-            )}
+          <div className="mb-4 p-3.5 rounded-2xl bg-red-500/10 border border-red-500/30 text-red-300 text-xs animate-fadeIn flex items-start gap-2.5">
+            <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+            <span className="font-medium leading-relaxed">{errorMsg}</span>
           </div>
         )}
 
@@ -613,38 +425,18 @@ export const LoginModal: React.FC<LoginModalProps> = ({
               />
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-              <div>
-                <label className="text-xs font-semibold text-slate-300 mb-1 flex items-center gap-1.5">
-                  <Mail className="w-3.5 h-3.5 text-blue-400" />
-                  E-Posta Adresiniz (Başvuran)
-                </label>
-                <input
-                  type="email"
-                  value={regEmail}
-                  onChange={(e) => setRegEmail(e.target.value)}
-                  placeholder="ahmet@bosch.com"
-                  className="w-full px-3 py-1.5 rounded-xl bg-slate-800/80 border border-slate-700 text-white placeholder-slate-500 text-xs focus:outline-none focus:border-blue-500 font-mono"
-                />
-              </div>
-
-              <div>
-                <label className="text-xs font-semibold text-slate-300 mb-1 flex items-center gap-1.5">
-                  <Send className="w-3.5 h-3.5 text-amber-400" />
-                  Onay Gidecek Yönetici Maili
-                </label>
-                <input
-                  type="email"
-                  value={regApproverEmail}
-                  onChange={(e) => setRegApproverEmail(e.target.value)}
-                  placeholder="yonetici@bosch.com"
-                  className="w-full px-3 py-1.5 rounded-xl bg-slate-800/80 border border-amber-500/40 text-amber-200 placeholder-slate-500 text-xs focus:outline-none focus:border-amber-400 font-mono"
-                />
-              </div>
-            </div>
-
-            <div className="p-2 rounded-xl bg-blue-950/20 border border-blue-500/20 text-[11px] text-blue-200/90 leading-tight">
-              📩 Kayıt sonrasında onay talebi <strong>{regApproverEmail || 'belirttiğiniz yönetici mailine'}</strong> gidecektir. O onaylarsa hesabınız çalışır, reddederse size ret maili iletilir.
+            <div>
+              <label className="text-xs font-semibold text-slate-300 mb-1 flex items-center gap-1.5">
+                <Mail className="w-3.5 h-3.5 text-blue-400" />
+                E-Posta Adresi
+              </label>
+              <input
+                type="email"
+                value={regEmail}
+                onChange={(e) => setRegEmail(e.target.value)}
+                placeholder="ahmet@bosch.com"
+                className="w-full px-3.5 py-2 rounded-xl bg-slate-800/80 border border-slate-700 text-white placeholder-slate-500 text-xs focus:outline-none focus:border-blue-500 font-mono"
+              />
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">

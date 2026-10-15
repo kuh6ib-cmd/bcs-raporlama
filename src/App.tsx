@@ -15,13 +15,7 @@ import { SPOSPRPipelineView } from './components/SPOSPRPipelineView';
 import { LoginModal } from './components/LoginModal';
 import { ChangePasswordModal } from './components/ChangePasswordModal';
 import { CreateNewRecordModal } from './components/CreateNewRecordModal';
-import { EmailApprovalModal } from './components/EmailApprovalModal';
 import { Service18xDictionaryModal } from './components/Service18xDictionaryModal';
-import { 
-  sendApprovalSuccessEmail, 
-  sendRejectionEmail,
-  decodeApprovalToken 
-} from './utils/notificationEngine';
 import { 
   Sparkles, 
   Download, 
@@ -35,11 +29,6 @@ import {
   PlusCircle,
   UserPlus,
   Check,
-  Mail,
-  Inbox,
-  CheckCircle2,
-  XCircle,
-  AlertCircle,
   BookOpen
 } from 'lucide-react';
 import { saveAs } from 'file-saver';
@@ -57,7 +46,7 @@ export default function App() {
         if (Array.isArray(parsed) && parsed.length > 0) {
           return parsed.map((u: any) => ({
             ...u,
-            status: u.status || 'APPROVED',
+            status: 'APPROVED',
             email: u.email || `${u.username}@bosch.com`,
             createdAt: u.createdAt || new Date().toISOString()
           }));
@@ -74,7 +63,7 @@ export default function App() {
       const savedUser = localStorage.getItem('MY_BCS_CURRENT_USER');
       if (savedUser) {
         const parsed = JSON.parse(savedUser);
-        if (parsed && parsed.id) return parsed;
+        if (parsed && parsed.id) return { ...parsed, status: 'APPROVED' };
       }
     } catch {
       // fallback
@@ -96,124 +85,11 @@ export default function App() {
   const [isCreateRecordOpen, setIsCreateRecordOpen] = useState(false);
   const [is18xDictionaryOpen, setIs18xDictionaryOpen] = useState(false);
   const [isRegisterModalOpen, setIsRegisterModalOpen] = useState(false);
-  const [isEmailModalOpen, setIsEmailModalOpen] = useState(false);
   const [toastMsg, setToastMsg] = useState<string | null>(null);
-  const [actionOutcome, setActionOutcome] = useState<{
-    type: 'APPROVED' | 'REJECTED';
-    user: UserAccount;
-    message: string;
-  } | null>(null);
-
-  // Check URL query parameters on load for direct email approval links (?action=approve&userId=...&token=...)
-  useEffect(() => {
-    try {
-      const params = new URLSearchParams(window.location.search);
-      const action = params.get('action') || (params.get('approve') ? 'approve' : (params.get('reject') ? 'reject' : null));
-      const userId = params.get('userId') || params.get('approve') || params.get('reject') || params.get('id');
-      const token = params.get('token');
-
-      if (action && (userId || token)) {
-        // Read latest accounts catalog
-        const savedRaw = localStorage.getItem('MY_BCS_USERS_CATALOG');
-        let catalog: UserAccount[] = userAccounts;
-        if (savedRaw) {
-          try {
-            const parsed = JSON.parse(savedRaw);
-            if (Array.isArray(parsed) && parsed.length > 0) catalog = parsed;
-          } catch {}
-        }
-
-        let targetUser = catalog.find((u) => u.id === userId);
-        if (!targetUser && token) {
-          const decoded = decodeApprovalToken(token);
-          if (decoded && decoded.username) {
-            targetUser = catalog.find((u) => u.username.toLowerCase() === decoded.username?.toLowerCase() || u.id === decoded.id);
-          }
-        }
-
-        // If user not in catalog but token carries their full data, restore user
-        if (!targetUser && token) {
-          const decoded = decodeApprovalToken(token);
-          if (decoded && decoded.username && decoded.id) {
-            targetUser = {
-              id: decoded.id,
-              username: decoded.username,
-              name: decoded.name || decoded.username,
-              email: decoded.email || '',
-              approverEmail: decoded.approverEmail || 'kuh6ib@bosch.com',
-              password: decoded.password || '1234',
-              role: decoded.role || 'FIELD_OPERATIONS',
-              roleName: decoded.roleName || 'Saha & Operasyon',
-              description: decoded.description || 'Kullanıcı hesabı',
-              permissions: decoded.permissions || {
-                canViewPricing: false,
-                canExportExcel: true,
-                canEditServiceCatalog: false,
-                canEditDealerList: false,
-                canViewDroppedRows: true
-              },
-              status: 'PENDING_APPROVAL',
-              createdAt: new Date().toISOString()
-            };
-            catalog = [targetUser, ...catalog];
-          }
-        }
-
-        if (targetUser) {
-          if (action === 'approve') {
-            const approver = 'E-Posta Doğrudan Onay Linki (Yetkili)';
-            const updatedUser: UserAccount = {
-              ...targetUser,
-              status: 'APPROVED',
-              approvedAt: new Date().toISOString(),
-              approvedBy: approver
-            };
-            const updatedList = catalog.map((u) => (u.id === targetUser!.id ? updatedUser : u));
-            setUserAccounts(updatedList);
-            try {
-              localStorage.setItem('MY_BCS_USERS_CATALOG', JSON.stringify(updatedList));
-            } catch {}
-
-            sendApprovalSuccessEmail(updatedUser, approver);
-            setActionOutcome({
-              type: 'APPROVED',
-              user: updatedUser,
-              message: `"${updatedUser.name}" (@${updatedUser.username}) kullanıcısının kayıt başvurusu başarıyla ONAYLANDI ve hesabı aktif edildi!`
-            });
-          } else if (action === 'reject') {
-            const rejecter = 'E-Posta Bağlantısı (Yetkili)';
-            const updatedUser: UserAccount = {
-              ...targetUser,
-              status: 'REJECTED',
-              rejectionReason: 'Yetkili e-posta onay bağlantısı üzerinden başvuru reddedildi.'
-            };
-            const updatedList = catalog.map((u) => (u.id === targetUser!.id ? updatedUser : u));
-            setUserAccounts(updatedList);
-            try {
-              localStorage.setItem('MY_BCS_USERS_CATALOG', JSON.stringify(updatedList));
-            } catch {}
-
-            sendRejectionEmail(updatedUser, rejecter);
-            setActionOutcome({
-              type: 'REJECTED',
-              user: updatedUser,
-              message: `"${updatedUser.name}" (@${updatedUser.username}) kullanıcısının kayıt başvurusu REDDEDİLDİ.`
-            });
-          }
-
-          // Clean query parameters from URL bar cleanly
-          window.history.replaceState({}, document.title, window.location.pathname);
-        }
-      }
-    } catch (err) {
-      console.error('URL approval processing error:', err);
-    }
-  }, []);
-
-  const pendingApprovalCount = userAccounts.filter((a) => a.status === 'PENDING_APPROVAL').length;
 
   const handleRegisterAccount = (newAccount: UserAccount) => {
-    const updatedAccounts = [newAccount, ...userAccounts.filter((u) => u.username !== newAccount.username)];
+    const updatedAccount = { ...newAccount, status: 'PENDING_APPROVAL' as const };
+    const updatedAccounts = [updatedAccount, ...userAccounts.filter((u) => u.username !== newAccount.username)];
     setUserAccounts(updatedAccounts);
     try {
       localStorage.setItem('MY_BCS_USERS_CATALOG', JSON.stringify(updatedAccounts));
@@ -221,56 +97,9 @@ export default function App() {
       // ignore
     }
     setToastMsg(
-      `"${newAccount.name}" kayıt başvurusu alındı! ${newAccount.approverEmail || 'yönetici'} adresine onay talebi e-postası iletildi.`
+      `"${updatedAccount.name}" hesabı oluşturuldu ve yönetici onayı bekleniyor.`
     );
-    setTimeout(() => setToastMsg(null), 6000);
-  };
-
-  const handleApproveUser = (userId: string) => {
-    const user = userAccounts.find((u) => u.id === userId);
-    if (!user) return;
-    const approver = currentUser ? `${currentUser.name} (${currentUser.username})` : 'Sistem Yöneticisi';
-    const updatedUser: UserAccount = {
-      ...user,
-      status: 'APPROVED',
-      approvedAt: new Date().toISOString(),
-      approvedBy: approver
-    };
-    const updatedAccounts = userAccounts.map((u) => (u.id === userId ? updatedUser : u));
-    setUserAccounts(updatedAccounts);
-    try {
-      localStorage.setItem('MY_BCS_USERS_CATALOG', JSON.stringify(updatedAccounts));
-    } catch {
-      // ignore
-    }
-
-    // Send confirmation email to applicant
-    sendApprovalSuccessEmail(updatedUser, approver);
-    setToastMsg(`✅ "${updatedUser.name}" hesabı ONAYLANDI! Onay maili ${updatedUser.email} adresine gönderildi. Artık giriş yapabilir.`);
-    setTimeout(() => setToastMsg(null), 6000);
-  };
-
-  const handleRejectUser = (userId: string, reason?: string) => {
-    const user = userAccounts.find((u) => u.id === userId);
-    if (!user) return;
-    const rejecter = currentUser ? `${currentUser.name} (${currentUser.username})` : 'Sistem Yöneticisi';
-    const updatedUser: UserAccount = {
-      ...user,
-      status: 'REJECTED',
-      rejectionReason: reason || 'Yönetici onay prosedürlerine uygun görülmedi.'
-    };
-    const updatedAccounts = userAccounts.map((u) => (u.id === userId ? updatedUser : u));
-    setUserAccounts(updatedAccounts);
-    try {
-      localStorage.setItem('MY_BCS_USERS_CATALOG', JSON.stringify(updatedAccounts));
-    } catch {
-      // ignore
-    }
-
-    // Send rejection email to applicant
-    sendRejectionEmail(updatedUser, rejecter, reason);
-    setToastMsg(`❌ "${updatedUser.name}" başvurusu REDDEDİLDİ. Bilgilendirme maili ${updatedUser.email} adresine gönderildi.`);
-    setTimeout(() => setToastMsg(null), 6000);
+    setTimeout(() => setToastMsg(null), 5000);
   };
 
   const handleLoginSuccess = (user: UserAccount, rememberMe: boolean) => {
@@ -849,73 +678,10 @@ export default function App() {
               </div>
             </div>
 
-            {/* Header Actions */}
-            <div className="flex items-center gap-2">
-              <button
-                type="button"
-                onClick={() => setIsCreateRecordOpen(true)}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white shadow-md shadow-blue-600/30 transition transform active:scale-95"
-              >
-                <PlusCircle className="w-3.5 h-3.5 text-white" />
-                <span>➕ Yeni Kayıt Oluştur</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setIs18xDictionaryOpen(true)}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 shadow-sm transition"
-                title="18xxxxx Hizmet Kodları Sözlüğünü Aç ve Düzenle"
-              >
-                <BookOpen className="w-3.5 h-3.5 text-amber-400" />
-                <span>18x Hizmet Sözlüğü</span>
-                <span className="px-1.5 py-0.2 rounded bg-amber-500/30 text-[10px] font-mono font-extrabold text-amber-200">
-                  {service18xList.length}
-                </span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => {
-                  const el = document.getElementById('upload-section');
-                  el?.scrollIntoView({ behavior: 'smooth' });
-                }}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 text-slate-200 hover:bg-slate-700 hover:text-white border border-slate-700 transition shadow-sm"
-              >
-                <span>📤 Dosya Yükle</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={loadSampleData}
-                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-red-600/20 text-red-300 hover:bg-red-600/30 border border-red-500/30 transition shadow-sm"
-              >
-                <Sparkles className="w-3.5 h-3.5 text-red-400 animate-pulse" />
-                <span className="hidden sm:inline">Örnek Veri Yükle</span>
-              </button>
-
-              {matrixSummary && (
-                <button
-                  type="button"
-                  onClick={() => {
-                    const canViewPricing = currentUser?.permissions?.canViewPricing ?? true;
-                    exportCleanSPOResultExcel({
-                      summary: matrixSummary,
-                      fileName: 'My_BCS_Servis_Raporu.xlsx',
-                      sourceFileName: workbookData?.fileName || 'SPO_SPR_Raporu.xlsx',
-                      canViewPricing
-                    });
-                  }}
-                  className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-500 text-white shadow transition"
-                >
-                  <Download className="w-3.5 h-3.5" />
-                  <span>Temiz Excel İndir</span>
-                </button>
-              )}
-
-              <div className="h-4 w-px bg-slate-800 mx-1 hidden sm:block" />
-
+            {/* Header Right Actions */}
+            <div className="flex items-center gap-2.5">
               {isAuthenticated && (
-                <div className="hidden lg:flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-900/90 border border-slate-800 text-xs text-slate-300 shadow-inner">
+                <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-900 border border-slate-800 text-xs text-slate-300 shadow-inner">
                   <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
                   <span className="font-semibold text-white">{currentUser.name}</span>
                   <span className="text-slate-400 font-mono text-[11px]">({currentUser.roleName})</span>
@@ -924,47 +690,12 @@ export default function App() {
 
               <button
                 type="button"
-                onClick={() => setIsEmailModalOpen(true)}
-                className="relative inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white border border-slate-700 transition"
-                title="E-Posta Bildirimleri ve Onay Masası"
-              >
-                <Inbox className="w-3.5 h-3.5 text-blue-400" />
-                <span className="hidden md:inline">Onay Masası</span>
-                {pendingApprovalCount > 0 && (
-                  <span className="inline-flex items-center justify-center px-1.5 py-0.2 rounded-full text-[10px] font-black bg-amber-500 text-slate-950 animate-pulse">
-                    {pendingApprovalCount}
-                  </span>
-                )}
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setIsRegisterModalOpen(true)}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-blue-950/60 text-blue-300 hover:bg-blue-900/80 border border-blue-800/50 transition"
-                title="Yeni Kullanıcı / Hesap Kaydı Ekle"
-              >
-                <UserPlus className="w-3.5 h-3.5 text-blue-400" />
-                <span className="hidden md:inline">Hesap Ekle</span>
-              </button>
-
-              <button
-                type="button"
-                onClick={() => setIsChangePasswordOpen(true)}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-slate-800 text-slate-300 hover:bg-slate-700 hover:text-white border border-slate-700 transition"
-                title="Giriş Şifresini Değiştir"
-              >
-                <KeyRound className="w-3.5 h-3.5 text-amber-400" />
-                <span className="hidden md:inline">Şifre Değiştir</span>
-              </button>
-
-              <button
-                type="button"
                 onClick={handleLogout}
-                className="inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold bg-red-950/60 text-red-300 hover:bg-red-900/80 border border-red-800/50 transition"
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold bg-red-950/60 text-red-300 hover:bg-red-900/80 border border-red-800/50 transition"
                 title="Oturumu Kapat"
               >
                 <LogOut className="w-3.5 h-3.5 text-red-400" />
-                <span className="hidden md:inline">Çıkış Yap</span>
+                <span className="inline">Çıkış Yap</span>
               </button>
             </div>
           </div>
@@ -1026,8 +757,6 @@ export default function App() {
           accounts={userAccounts}
           onLoginSuccess={handleLoginSuccess}
           onRegisterAccount={handleRegisterAccount}
-          onApproveUser={handleApproveUser}
-          onOpenEmailModal={() => setIsEmailModalOpen(true)}
         />
       )}
 
@@ -1055,103 +784,11 @@ export default function App() {
                 handleRegisterAccount(acc);
                 setIsRegisterModalOpen(false);
               }}
-              onApproveUser={handleApproveUser}
-              onOpenEmailModal={() => {
-                setIsRegisterModalOpen(false);
-                setIsEmailModalOpen(true);
-              }}
               initialTab="register"
             />
           </div>
         </div>
       )}
-
-      {/* One-Click Approval / Rejection Result Banner Modal */}
-      {actionOutcome && (
-        <div className="fixed inset-0 z-[200] flex items-center justify-center bg-slate-950/85 backdrop-blur-md p-4 animate-fadeIn font-['Inter',sans-serif]">
-          <div className="w-full max-w-md bg-slate-900 border border-slate-700/80 rounded-2xl p-6 shadow-2xl text-center space-y-4">
-            {actionOutcome.type === 'APPROVED' ? (
-              <>
-                <div className="w-16 h-16 rounded-2xl bg-emerald-500/20 border border-emerald-500/40 text-emerald-400 flex items-center justify-center mx-auto shadow-lg shadow-emerald-500/20">
-                  <CheckCircle2 className="w-9 h-9" />
-                </div>
-                <div className="space-y-1">
-                  <h3 className="text-xl font-bold text-white">Kayıt Başvurusu Onaylandı!</h3>
-                  <p className="text-xs text-emerald-400 font-semibold">
-                    Onay bağlantısı başarıyla doğrulandı ve hesap aktif edildi
-                  </p>
-                </div>
-                <div className="p-3.5 bg-slate-800/80 rounded-xl text-xs text-slate-300 text-left space-y-2 border border-slate-700/60">
-                  <div className="flex justify-between border-b border-slate-700/60 pb-1.5">
-                    <span className="text-slate-400">Ad Soyad:</span>
-                    <span className="font-bold text-white">{actionOutcome.user.name}</span>
-                  </div>
-                  <div className="flex justify-between border-b border-slate-700/60 pb-1.5">
-                    <span className="text-slate-400">Kullanıcı Adı:</span>
-                    <span className="font-mono text-cyan-300">@{actionOutcome.user.username}</span>
-                  </div>
-                  <div className="flex justify-between border-b border-slate-700/60 pb-1.5">
-                    <span className="text-slate-400">Tanımlanan Rol:</span>
-                    <span className="font-medium text-slate-200">{actionOutcome.user.roleName}</span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-400">Durum:</span>
-                    <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/30">
-                      AKTİF &amp; ONAYLI
-                    </span>
-                  </div>
-                </div>
-                <p className="text-xs text-slate-400 leading-relaxed">
-                  Kullanıcı artık şifresiyle sisteme giriş yapabilir ve belirlenen yetkileriyle çalışmaya başlayabilir.
-                </p>
-                <div className="pt-2 flex gap-3">
-                  <button
-                    type="button"
-                    onClick={() => setActionOutcome(null)}
-                    className="w-full py-2.5 px-4 rounded-xl font-bold text-xs bg-emerald-600 hover:bg-emerald-500 text-white shadow-lg shadow-emerald-600/30 transition"
-                  >
-                    Tamam, Devam Et
-                  </button>
-                </div>
-              </>
-            ) : (
-              <>
-                <div className="w-16 h-16 rounded-2xl bg-red-500/20 border border-red-500/40 text-red-400 flex items-center justify-center mx-auto shadow-lg shadow-red-500/20">
-                  <XCircle className="w-9 h-9" />
-                </div>
-                <div className="space-y-1">
-                  <h3 className="text-xl font-bold text-white">Başvuru Reddedildi</h3>
-                  <p className="text-xs text-red-400 font-semibold">
-                    E-posta bağlantısı üzerinden başvuru ret işlemi tamamlandı
-                  </p>
-                </div>
-                <div className="p-3.5 bg-slate-800/80 rounded-xl text-xs text-slate-300 text-left space-y-1 border border-slate-700/60">
-                  <div className="text-slate-400">Kullanıcı: <span className="text-white font-bold">{actionOutcome.user.name}</span></div>
-                  <div className="text-slate-400">Kullanıcı Adı: <span className="font-mono text-slate-300">@{actionOutcome.user.username}</span></div>
-                  <div className="text-slate-400">Durum: <span className="text-red-400 font-bold">REDDEDİLDİ</span></div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setActionOutcome(null)}
-                  className="w-full py-2.5 px-4 rounded-xl font-bold text-xs bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 transition"
-                >
-                  Pencereyi Kapat
-                </button>
-              </>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* Email Notifications & Approval Portal Modal */}
-      <EmailApprovalModal
-        isOpen={isEmailModalOpen}
-        onClose={() => setIsEmailModalOpen(false)}
-        accounts={userAccounts}
-        onApproveUser={handleApproveUser}
-        onRejectUser={handleRejectUser}
-        currentUser={currentUser}
-      />
 
       {/* Change Passcode Modal */}
       <ChangePasswordModal

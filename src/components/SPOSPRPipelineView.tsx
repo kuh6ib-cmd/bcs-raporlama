@@ -28,8 +28,7 @@ import {
   Settings,
   MapPin,
   PlusCircle,
-  BookOpen,
-  Activity
+  BookOpen
 } from 'lucide-react';
 import { WorkbookData, Service18xItem, BCSServiceMasterItem, BCSMatrixSummary, BCSMatrixRow, UserAccount } from '../types';
 import { exportCleanSPOResultExcel } from '../utils/excelExporter';
@@ -83,7 +82,7 @@ export const SPOSPRPipelineView: React.FC<SPOSPRPipelineViewProps> = ({
   const [isDragOver2, setIsDragOver2] = useState(false);
   const [isDragOver3, setIsDragOver3] = useState(false);
 
-  const [activeTab, setActiveTab] = useState<'matrix' | 'servicePricing' | 'dealerInspector' | 'dropped' | 'correlation'>('matrix');
+  const [activeTab, setActiveTab] = useState<'matrix' | 'servicePricing' | 'dealerInspector' | 'dropped'>('matrix');
   const [searchTerm, setSearchTerm] = useState('');
   const [claimedFilter, setClaimedFilter] = useState<string>('all');
   const [onlineFilter, setOnlineFilter] = useState<string>('all');
@@ -93,6 +92,9 @@ export const SPOSPRPipelineView: React.FC<SPOSPRPipelineViewProps> = ({
   const [tab3StatusFilter, setTab3StatusFilter] = useState<string>('all');
   const [selectedCategories, setSelectedCategories] = useState<string[]>([]);
   const [tab2CategoryFilter, setTab2CategoryFilter] = useState<string>('all');
+  const [tab2ClaimedFilter, setTab2ClaimedFilter] = useState<string>('all');
+  const [tab2OnlineFilter, setTab2OnlineFilter] = useState<string>('all');
+  const [tab2PriceSort, setTab2PriceSort] = useState<'asc' | 'desc' | 'default'>('asc');
   const [pageSizeOption, setPageSizeOption] = useState<number | 'all'>('all');
   const [currentPage, setCurrentPage] = useState(1);
   const [isExporting, setIsExporting] = useState(false);
@@ -102,110 +104,6 @@ export const SPOSPRPipelineView: React.FC<SPOSPRPipelineViewProps> = ({
   const [selectedDealer, setSelectedDealer] = useState<BCSMatrixRow | null>(null);
   const [selectedServiceToCompare, setSelectedServiceToCompare] = useState<string>('');
   const [serviceDealerFilter, setServiceDealerFilter] = useState<'all' | 'priced' | 'noprice' | 'notoffered'>('all');
-
-  // Correlation analysis state
-  const serviceColumnsForCorr = summary?.serviceColumns || [];
-  const activeRowsForCorr = summary?.activeRows || [];
-  const [corrServiceA, setCorrServiceA] = useState<string>('');
-  const [corrServiceB, setCorrServiceB] = useState<string>('');
-  const [priceFreqService, setPriceFreqService] = useState<string>('');
-
-  React.useEffect(() => {
-    if (serviceColumnsForCorr.length > 0) {
-      if (!corrServiceA || !serviceColumnsForCorr.includes(corrServiceA)) {
-        setCorrServiceA(serviceColumnsForCorr[0]);
-      }
-      if (!corrServiceB || !serviceColumnsForCorr.includes(corrServiceB)) {
-        setCorrServiceB(serviceColumnsForCorr[1] || serviceColumnsForCorr[0]);
-      }
-      if (!priceFreqService || !serviceColumnsForCorr.includes(priceFreqService)) {
-        setPriceFreqService(serviceColumnsForCorr[0]);
-      }
-    }
-  }, [serviceColumnsForCorr]);
-
-  const priceFrequencyData = useMemo(() => {
-    if (!summary?.activeRows || !priceFreqService) return [];
-    const freqMap = new Map<number, { price: number; count: number; firms: Array<{ firmName: string; city: string }> }>();
-    for (const row of summary.activeRows) {
-      const rawVal = row.serviceValues?.[priceFreqService];
-      const p = Number(rawVal);
-      if (!isNaN(p) && p > 0) {
-        if (!freqMap.has(p)) {
-          freqMap.set(p, { price: p, count: 0, firms: [] });
-        }
-        const entry = freqMap.get(p)!;
-        entry.count++;
-        entry.firms.push({ firmName: row.bcsFirmName || 'Servis', city: row.city || '' });
-      }
-    }
-    return Array.from(freqMap.values()).sort((a, b) => a.price - b.price);
-  }, [summary?.activeRows, priceFreqService]);
-
-  const maxPriceCount = useMemo(() => {
-    return Math.max(...priceFrequencyData.map(d => d.count), 1);
-  }, [priceFrequencyData]);
-
-  const computeCorrelation = useMemo(() => {
-    return (colA: string, colB: string) => {
-      const pairs: { firmName: string; city: string; x: number; y: number }[] = [];
-      activeRowsForCorr.forEach((row) => {
-        const valA = Number(row.serviceValues?.[colA]);
-        const valB = Number(row.serviceValues?.[colB]);
-        if (!isNaN(valA) && valA > 0 && !isNaN(valB) && valB > 0) {
-          pairs.push({
-            firmName: row.bcsFirmName || 'Servis',
-            city: row.city || '',
-            x: valA,
-            y: valB
-          });
-        }
-      });
-
-      const n = pairs.length;
-      if (n < 2) return { r: 0, n: 0, pairs, avgX: 0, avgY: 0 };
-
-      let sumX = 0, sumY = 0, sumXY = 0, sumX2 = 0, sumY2 = 0;
-      pairs.forEach((p) => {
-        sumX += p.x;
-        sumY += p.y;
-        sumXY += p.x * p.y;
-        sumX2 += p.x * p.x;
-        sumY2 += p.y * p.y;
-      });
-
-      const avgX = sumX / n;
-      const avgY = sumY / n;
-      const numerator = n * sumXY - sumX * sumY;
-      const denominator = Math.sqrt((n * sumX2 - sumX * sumX) * (n * sumY2 - sumY * sumY));
-      
-      if (denominator === 0) return { r: 0, n, pairs, avgX, avgY };
-
-      const r = numerator / denominator;
-      return { r, n, pairs, avgX, avgY };
-    };
-  }, [activeRowsForCorr]);
-
-  const currentCorrelationResult = useMemo(() => {
-    if (!corrServiceA || !corrServiceB) return { r: 0, n: 0, pairs: [], avgX: 0, avgY: 0 };
-    return computeCorrelation(corrServiceA, corrServiceB);
-  }, [corrServiceA, corrServiceB, computeCorrelation]);
-
-  const topCorrelationsList = useMemo(() => {
-    if (serviceColumnsForCorr.length < 2) return [];
-    const results: { colA: string; colB: string; r: number; n: number }[] = [];
-    const sampleCols = serviceColumnsForCorr.slice(0, 12);
-    for (let i = 0; i < sampleCols.length; i++) {
-      for (let j = i + 1; j < sampleCols.length; j++) {
-        const res = computeCorrelation(sampleCols[i], sampleCols[j]);
-        if (res.n >= 5 && !isNaN(res.r)) {
-          results.push({ colA: sampleCols[i], colB: sampleCols[j], r: res.r, n: res.n });
-        }
-      }
-    }
-    results.sort((a, b) => Math.abs(b.r) - Math.abs(a.r));
-    return results.slice(0, 10);
-  }, [serviceColumnsForCorr, computeCorrelation]);
 
   const cities = Array.from(new Set((summary?.activeRows || []).map((r) => r.city).filter((c) => c && c !== '#YOK')));
   const managers = Array.from(new Set((summary?.activeRows || []).map((r) => r.regionManager).filter((m) => m && m !== '#YOK')));
@@ -260,8 +158,19 @@ export const SPOSPRPipelineView: React.FC<SPOSPRPipelineViewProps> = ({
       const matchesSearch = !searchTerm || Object.values(r).some((v) => 
         String(v).toLowerCase().includes(searchTerm.toLowerCase())
       );
-      const matchesClaimed = claimedFilter === 'all' || r.claimed === claimedFilter;
-      const matchesOnline = onlineFilter === 'all' || r.spoOnlineBooking === onlineFilter;
+      const isClaimedYes = r.claimed === 'EVET' || String(r.claimed || '').trim().toUpperCase() === 'EVET';
+      const matchesClaimed = claimedFilter === 'all' 
+        ? true 
+        : claimedFilter === 'EVET' 
+          ? isClaimedYes 
+          : !isClaimedYes;
+
+      const isOnlineYes = r.spoOnlineBooking === 'EVET' || String(r.spoOnlineBooking || '').trim().toUpperCase() === 'EVET';
+      const matchesOnline = onlineFilter === 'all' 
+        ? true 
+        : onlineFilter === 'EVET' 
+          ? isOnlineYes 
+          : !isOnlineYes;
 
       let matchesCity = cityFilter === 'all';
       if (!matchesCity) {
@@ -689,65 +598,123 @@ export const SPOSPRPipelineView: React.FC<SPOSPRPipelineViewProps> = ({
       {summary && (
         <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 sm:gap-4">
           <div 
-            onClick={() => {
-              setClaimedFilter((prev) => (prev === 'HAYIR' ? 'all' : 'HAYIR'));
-              setCurrentPage(1);
-            }}
-            className={`bg-slate-800/60 border rounded-2xl p-4 space-y-1 cursor-pointer transition hover:bg-slate-800/90 ${
+            className={`bg-slate-800/60 border rounded-2xl p-4 space-y-2 transition ${
               claimedFilter === 'HAYIR' 
                 ? 'border-red-500 ring-2 ring-red-500/40 bg-red-950/20' 
                 : claimedFilter === 'EVET'
                 ? 'border-emerald-500 ring-2 ring-emerald-500/40 bg-emerald-950/20'
                 : 'border-slate-700/80 hover:border-slate-600'
             }`}
-            title="Kayıtlı olmayan servisleri filtrelemek için tıklayın"
           >
             <div className="flex items-center justify-between">
               <span className="text-[11px] text-slate-400 font-medium flex items-center gap-1.5">
                 <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
-                Kayıt Oranı
+                Kayıt Oranı (claimed)
               </span>
-              {claimedFilter === 'HAYIR' && (
-                <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded bg-red-500/30 text-red-300">
-                  Filtrelendi
-                </span>
+              {claimedFilter !== 'all' && (
+                <button
+                  type="button"
+                  onClick={() => { setClaimedFilter('all'); setCurrentPage(1); }}
+                  className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded bg-slate-700 hover:bg-slate-600 text-white transition"
+                  title="Filtreyi kaldır"
+                >
+                  ✕ {claimedFilter === 'EVET' ? 'Kayıtlı' : 'Kayıtsız'}
+                </button>
               )}
             </div>
             <div className="text-2xl font-extrabold text-white">{summary.registeredRatio}</div>
-            <span className="text-[10px] text-emerald-400 block truncate">
-              {summary.claimedYesCount} Kayıtlı / {summary.claimedNoCount} Kayıtsız
-            </span>
+            <div className="flex items-center gap-1.5 pt-0.5">
+              <button
+                type="button"
+                onClick={() => {
+                  setClaimedFilter((prev) => (prev === 'EVET' ? 'all' : 'EVET'));
+                  setCurrentPage(1);
+                }}
+                className={`text-[10px] px-2 py-0.5 rounded-lg font-bold transition flex items-center gap-1 ${
+                  claimedFilter === 'EVET' 
+                    ? 'bg-emerald-500 text-slate-950 ring-1 ring-emerald-400' 
+                    : 'bg-emerald-950/40 text-emerald-300 border border-emerald-800/40 hover:bg-emerald-900/50'
+                }`}
+                title="Sadece kayıtlı servisleri filtrele"
+              >
+                <span>✓ {summary.claimedYesCount} Kayıtlı</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setClaimedFilter((prev) => (prev === 'HAYIR' ? 'all' : 'HAYIR'));
+                  setCurrentPage(1);
+                }}
+                className={`text-[10px] px-2 py-0.5 rounded-lg font-bold transition flex items-center gap-1 ${
+                  claimedFilter === 'HAYIR' 
+                    ? 'bg-red-500 text-white ring-1 ring-red-400' 
+                    : 'bg-red-950/40 text-red-300 border border-red-800/40 hover:bg-red-900/50'
+                }`}
+                title="Sadece kayıtlı olmayan servisleri filtrele"
+              >
+                <span>✕ {summary.claimedNoCount} Kayıtsız</span>
+              </button>
+            </div>
           </div>
 
           <div 
-            onClick={() => {
-              setOnlineFilter((prev) => (prev === 'HAYIR' ? 'all' : 'HAYIR'));
-              setCurrentPage(1);
-            }}
-            className={`bg-slate-800/60 border rounded-2xl p-4 space-y-1 cursor-pointer transition hover:bg-slate-800/90 ${
+            className={`bg-slate-800/60 border rounded-2xl p-4 space-y-2 transition ${
               onlineFilter === 'HAYIR' 
                 ? 'border-amber-500 ring-2 ring-amber-500/40 bg-amber-950/20' 
                 : onlineFilter === 'EVET'
                 ? 'border-blue-500 ring-2 ring-blue-500/40 bg-blue-950/20'
                 : 'border-slate-700/80 hover:border-slate-600'
             }`}
-            title="Online olmayan servisleri filtrelemek için tıklayın"
           >
             <div className="flex items-center justify-between">
               <span className="text-[11px] text-slate-400 font-medium flex items-center gap-1.5">
                 <Building2 className="w-3.5 h-3.5 text-blue-400" />
-                Online Oranı
+                Online Booking Oranı
               </span>
-              {onlineFilter === 'HAYIR' && (
-                <span className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded bg-amber-500/30 text-amber-300">
-                  Filtrelendi
-                </span>
+              {onlineFilter !== 'all' && (
+                <button
+                  type="button"
+                  onClick={() => { setOnlineFilter('all'); setCurrentPage(1); }}
+                  className="text-[9px] font-black uppercase px-1.5 py-0.5 rounded bg-slate-700 hover:bg-slate-600 text-white transition"
+                  title="Filtreyi kaldır"
+                >
+                  ✕ {onlineFilter === 'EVET' ? 'Online' : 'Offline'}
+                </button>
               )}
             </div>
             <div className="text-2xl font-extrabold text-blue-400">{summary.onlineRatio}</div>
-            <span className="text-[10px] text-slate-400 block truncate">
-              {summary.onlineYesCount} Online / {summary.onlineNoCount} Offline
-            </span>
+            <div className="flex items-center gap-1.5 pt-0.5">
+              <button
+                type="button"
+                onClick={() => {
+                  setOnlineFilter((prev) => (prev === 'EVET' ? 'all' : 'EVET'));
+                  setCurrentPage(1);
+                }}
+                className={`text-[10px] px-2 py-0.5 rounded-lg font-bold transition flex items-center gap-1 ${
+                  onlineFilter === 'EVET' 
+                    ? 'bg-blue-500 text-white ring-1 ring-blue-400' 
+                    : 'bg-blue-950/40 text-blue-300 border border-blue-800/40 hover:bg-blue-900/50'
+                }`}
+                title="Sadece online randevu açık olanları filtrele"
+              >
+                <span>✓ {summary.onlineYesCount} Online</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setOnlineFilter((prev) => (prev === 'HAYIR' ? 'all' : 'HAYIR'));
+                  setCurrentPage(1);
+                }}
+                className={`text-[10px] px-2 py-0.5 rounded-lg font-bold transition flex items-center gap-1 ${
+                  onlineFilter === 'HAYIR' 
+                    ? 'bg-amber-500 text-slate-950 ring-1 ring-amber-400' 
+                    : 'bg-amber-950/40 text-amber-300 border border-amber-800/40 hover:bg-amber-900/50'
+                }`}
+                title="Sadece online olmayan servisleri filtrele"
+              >
+                <span>✕ {summary.onlineNoCount} Offline</span>
+              </button>
+            </div>
           </div>
 
           <div 
@@ -922,19 +889,6 @@ export const SPOSPRPipelineView: React.FC<SPOSPRPipelineViewProps> = ({
               <XCircle className="w-4 h-4 text-red-400" />
               <span>Silinen Satırlar ({summary.deletedCandidateCount})</span>
             </button>
-
-            <button
-              type="button"
-              onClick={() => setActiveTab('correlation')}
-              className={`flex items-center gap-2 px-5 py-3 border-b-2 font-medium text-xs whitespace-nowrap transition ${
-                activeTab === 'correlation'
-                  ? 'border-emerald-500 text-white bg-slate-800/60'
-                  : 'border-transparent text-slate-400 hover:text-slate-200'
-              }`}
-            >
-              <Activity className="w-4 h-4 text-emerald-400" />
-              <span>Fiyat Korelasyonu</span>
-            </button>
           </div>
 
           {/* TAB 1: Exact Matrix Table */}
@@ -1018,111 +972,150 @@ export const SPOSPRPipelineView: React.FC<SPOSPRPipelineViewProps> = ({
                 </div>
 
                 <div className="flex flex-wrap items-center gap-2">
-                  {/* 1. Kayıtlı Olmayan Servisler */}
+                  {/* Claimed Filters */}
+                  <div className="flex items-center gap-1 bg-slate-950/80 p-1 rounded-xl border border-slate-800">
+                    <span className="text-[10px] font-extrabold text-slate-400 px-2 uppercase tracking-wider">
+                      claimed:
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setClaimedFilter((prev) => (prev === 'EVET' ? 'all' : 'EVET'));
+                        setCurrentPage(1);
+                      }}
+                      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold transition ${
+                        claimedFilter === 'EVET'
+                          ? 'bg-emerald-600 text-white shadow-md shadow-emerald-950/50 ring-1 ring-emerald-400'
+                          : 'text-emerald-400 hover:bg-emerald-950/40 hover:text-white'
+                      }`}
+                      title="Sadece kayıtlı servisleri (claimed = EVET) filtrele"
+                    >
+                      <CheckCircle2 className="w-3.5 h-3.5" />
+                      <span>Kayıtlı</span>
+                      {summary && <span className="opacity-80 text-[10px]">({summary.claimedYesCount})</span>}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setClaimedFilter((prev) => (prev === 'HAYIR' ? 'all' : 'HAYIR'));
+                        setCurrentPage(1);
+                      }}
+                      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold transition ${
+                        claimedFilter === 'HAYIR'
+                          ? 'bg-red-600 text-white shadow-md shadow-red-950/50 ring-1 ring-red-400'
+                          : 'text-red-400 hover:bg-red-950/40 hover:text-white'
+                      }`}
+                      title="Sadece kayıtlı olmayan servisleri (claimed = HAYIR) filtrele"
+                    >
+                      <XCircle className="w-3.5 h-3.5" />
+                      <span>Kayıtsız</span>
+                      {summary && <span className="opacity-80 text-[10px]">({summary.claimedNoCount})</span>}
+                    </button>
+                  </div>
+
+                  {/* Online Booking Filters */}
+                  <div className="flex items-center gap-1 bg-slate-950/80 p-1 rounded-xl border border-slate-800">
+                    <span className="text-[10px] font-extrabold text-slate-400 px-2 uppercase tracking-wider">
+                      Online Booking:
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setOnlineFilter((prev) => (prev === 'EVET' ? 'all' : 'EVET'));
+                        setCurrentPage(1);
+                      }}
+                      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold transition ${
+                        onlineFilter === 'EVET'
+                          ? 'bg-blue-600 text-white shadow-md shadow-blue-950/50 ring-1 ring-blue-400'
+                          : 'text-blue-400 hover:bg-blue-950/40 hover:text-white'
+                      }`}
+                      title="Sadece online randevu aktif olanları (EVET) filtrele"
+                    >
+                      <Sparkles className="w-3.5 h-3.5" />
+                      <span>Online</span>
+                      {summary && <span className="opacity-80 text-[10px]">({summary.onlineYesCount})</span>}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setOnlineFilter((prev) => (prev === 'HAYIR' ? 'all' : 'HAYIR'));
+                        setCurrentPage(1);
+                      }}
+                      className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-bold transition ${
+                        onlineFilter === 'HAYIR'
+                          ? 'bg-amber-600 text-slate-950 shadow-md shadow-amber-950/50 ring-1 ring-amber-400 font-extrabold'
+                          : 'text-amber-400 hover:bg-amber-950/40 hover:text-white'
+                      }`}
+                      title="Sadece online olmayan servisleri (HAYIR) filtrele"
+                    >
+                      <Ban className="w-3.5 h-3.5" />
+                      <span>Offline</span>
+                      {summary && <span className="opacity-80 text-[10px]">({summary.onlineNoCount})</span>}
+                    </button>
+                  </div>
+
+                  {/* Combined Shortcuts */}
                   <button
                     type="button"
                     onClick={() => {
-                      setClaimedFilter((prev) => (prev === 'HAYIR' ? 'all' : 'HAYIR'));
+                      if (claimedFilter === 'EVET' && onlineFilter === 'EVET') {
+                        setClaimedFilter('all');
+                        setOnlineFilter('all');
+                      } else {
+                        setClaimedFilter('EVET');
+                        setOnlineFilter('EVET');
+                      }
                       setCurrentPage(1);
                     }}
-                    className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold transition shadow-sm border ${
-                      claimedFilter === 'HAYIR'
-                        ? 'bg-red-500 text-white border-red-400 ring-2 ring-red-500/40 shadow-red-900/30'
-                        : 'bg-slate-950 text-red-300 border-red-900/40 hover:bg-red-950/40 hover:border-red-700/60'
+                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition shadow-sm border ${
+                      claimedFilter === 'EVET' && onlineFilter === 'EVET'
+                        ? 'bg-gradient-to-r from-emerald-600 to-blue-600 text-white border-emerald-400 ring-2 ring-emerald-400/50'
+                        : 'bg-slate-950 text-slate-300 border-slate-700/80 hover:border-emerald-500/60 hover:text-white'
                     }`}
+                    title="Hem Kayıtlı (claimed=EVET) hem Online Booking (EVET) servisleri filtrele"
+                  >
+                    <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                    <span>✓ Hem Online Hem Kayıtlı</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (claimedFilter === 'HAYIR' && onlineFilter === 'HAYIR') {
+                        setClaimedFilter('all');
+                        setOnlineFilter('all');
+                      } else {
+                        setClaimedFilter('HAYIR');
+                        setOnlineFilter('HAYIR');
+                      }
+                      setCurrentPage(1);
+                    }}
+                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition shadow-sm border ${
+                      claimedFilter === 'HAYIR' && onlineFilter === 'HAYIR'
+                        ? 'bg-gradient-to-r from-red-600 to-amber-600 text-white border-red-400 ring-2 ring-red-400/50'
+                        : 'bg-slate-950 text-slate-400 border-slate-800 hover:border-red-500/60 hover:text-red-300'
+                    }`}
+                    title="Hem Kayıtsız (claimed=HAYIR) hem Offline (HAYIR) servisleri filtrele"
                   >
                     <XCircle className="w-3.5 h-3.5 text-red-400" />
-                    <span>Kayıtlı Olmayan Servisler</span>
-                    {summary && (
-                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-black ${
-                        claimedFilter === 'HAYIR' ? 'bg-black/30 text-white' : 'bg-red-950/80 text-red-300 border border-red-800/40'
-                      }`}>
-                        {summary.claimedNoCount}
-                      </span>
-                    )}
+                    <span>✕ Hem Kayıtsız Hem Offline</span>
                   </button>
 
-                  {/* 2. Online Olmayanlar */}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setOnlineFilter((prev) => (prev === 'HAYIR' ? 'all' : 'HAYIR'));
-                      setCurrentPage(1);
-                    }}
-                    className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold transition shadow-sm border ${
-                      onlineFilter === 'HAYIR'
-                        ? 'bg-amber-500 text-slate-950 border-amber-400 ring-2 ring-amber-500/40 font-extrabold shadow-amber-900/30'
-                        : 'bg-slate-950 text-amber-300 border-amber-900/40 hover:bg-amber-950/40 hover:border-amber-700/60'
-                    }`}
-                  >
-                    <Ban className="w-3.5 h-3.5 text-amber-400" />
-                    <span>Online Olmayanlar</span>
-                    {summary && (
-                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-black ${
-                        onlineFilter === 'HAYIR' ? 'bg-black/30 text-slate-950' : 'bg-amber-950/80 text-amber-300 border border-amber-800/40'
-                      }`}>
-                        {summary.onlineNoCount}
-                      </span>
-                    )}
-                  </button>
-
-                  {/* 3. Fiyatı Hiç Girilmemiş Olan Servisler */}
+                  {/* Fiyatı Hiç Girilmemiş Olan Servisler */}
                   <button
                     type="button"
                     onClick={() => {
                       setPriceAvailabilityFilter((prev) => (prev === 'no_pricing' ? 'all' : 'no_pricing'));
                       setCurrentPage(1);
                     }}
-                    className={`inline-flex items-center gap-2 px-3 py-1.5 rounded-xl text-xs font-bold transition shadow-sm border ${
+                    className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-xs font-bold transition shadow-sm border ${
                       priceAvailabilityFilter === 'no_pricing'
                         ? 'bg-rose-600 text-white border-rose-400 ring-2 ring-rose-600/40 shadow-rose-900/30'
                         : 'bg-slate-950 text-rose-300 border-rose-900/40 hover:bg-rose-950/40 hover:border-rose-700/60'
                     }`}
                   >
                     <DollarSign className="w-3.5 h-3.5 text-rose-400" />
-                    <span>Fiyatı Hiç Girilmemiş Servisler</span>
-                    {summary && (
-                      <span className={`px-1.5 py-0.5 rounded text-[10px] font-black ${
-                        priceAvailabilityFilter === 'no_pricing' ? 'bg-black/30 text-white' : 'bg-rose-950/80 text-rose-300 border border-rose-800/40'
-                      }`}>
-                        {summary.noPricingCount}
-                      </span>
-                    )}
-                  </button>
-
-                  <div className="h-4 w-px bg-slate-800 hidden md:block mx-0.5" />
-
-                  {/* Positive status helpers */}
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setClaimedFilter((prev) => (prev === 'EVET' ? 'all' : 'EVET'));
-                      setCurrentPage(1);
-                    }}
-                    className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs font-medium transition border ${
-                      claimedFilter === 'EVET'
-                        ? 'bg-emerald-600 text-white border-emerald-400 font-bold'
-                        : 'bg-slate-950/60 text-slate-400 border-slate-800 hover:text-emerald-300 hover:border-emerald-800/50'
-                    }`}
-                  >
-                    <CheckCircle2 className="w-3 h-3 text-emerald-400" />
-                    <span>Kayıtlılar ({summary?.claimedYesCount})</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setOnlineFilter((prev) => (prev === 'EVET' ? 'all' : 'EVET'));
-                      setCurrentPage(1);
-                    }}
-                    className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-xl text-xs font-medium transition border ${
-                      onlineFilter === 'EVET'
-                        ? 'bg-blue-600 text-white border-blue-400 font-bold'
-                        : 'bg-slate-950/60 text-slate-400 border-slate-800 hover:text-blue-300 hover:border-blue-800/50'
-                    }`}
-                  >
-                    <Sparkles className="w-3 h-3 text-blue-400" />
-                    <span>Online Olanlar ({summary?.onlineYesCount})</span>
+                    <span>Fiyatı Hiç Girilmemişler ({summary?.noPricingCount})</span>
                   </button>
                 </div>
               </div>
@@ -1502,7 +1495,15 @@ export const SPOSPRPipelineView: React.FC<SPOSPRPipelineViewProps> = ({
                           const isUnmatchedCode = code && code === title;
 
                           return (
-                            <th key={col} className="px-3 py-2.5 font-medium border-l border-slate-800 text-center min-w-[140px]">
+                            <th 
+                              key={col} 
+                              onClick={() => {
+                                setSelectedServiceToCompare(col);
+                                setActiveTab('servicePricing');
+                              }}
+                              className="px-3 py-2.5 font-medium border-l border-slate-800 text-center min-w-[140px] cursor-pointer hover:bg-slate-700/60 transition group select-none"
+                              title={`${title} için en düşükten en yükseğe fiyat aralığı analizini görmek için tıklayın`}
+                            >
                               <div className="flex flex-col items-center justify-center gap-1">
                                 {isUnmatchedCode ? (
                                   <>
@@ -1564,22 +1565,32 @@ export const SPOSPRPipelineView: React.FC<SPOSPRPipelineViewProps> = ({
                             <span>{r.bcsFirmName}</span>
                           </td>
                           <td className="px-3 py-2 text-center">
-                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                              r.claimed === 'EVET'
-                                ? 'bg-emerald-950 text-emerald-300 border border-emerald-800'
-                                : 'text-slate-500'
-                            }`}>
-                              {r.claimed}
-                            </span>
+                            {(() => {
+                              const isClaimed = r.claimed === 'EVET' || String(r.claimed || '').trim().toUpperCase() === 'EVET';
+                              return (
+                                <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                  isClaimed
+                                    ? 'bg-emerald-950 text-emerald-300 border border-emerald-800'
+                                    : 'bg-red-950/60 text-red-400 border border-red-900/60'
+                                }`}>
+                                  {isClaimed ? 'EVET' : 'HAYIR'}
+                                </span>
+                              );
+                            })()}
                           </td>
                           <td className="px-3 py-2 text-center">
-                            <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                              r.spoOnlineBooking === 'EVET'
-                                ? 'bg-blue-950 text-blue-300 border border-blue-800'
-                                : 'text-slate-500'
-                            }`}>
-                              {r.spoOnlineBooking}
-                            </span>
+                            {(() => {
+                              const isOnline = r.spoOnlineBooking === 'EVET' || String(r.spoOnlineBooking || '').trim().toUpperCase() === 'EVET';
+                              return (
+                                <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
+                                  isOnline
+                                    ? 'bg-blue-950 text-blue-300 border border-blue-800'
+                                    : 'bg-amber-950/60 text-amber-400 border border-amber-900/60'
+                                }`}>
+                                  {isOnline ? 'EVET' : 'HAYIR'}
+                                </span>
+                              );
+                            })()}
                           </td>
                           <td className="px-3 py-2 text-center border-l border-slate-800/80 bg-slate-900/30">
                             <div className="flex flex-col items-center justify-center gap-0.5">
@@ -1802,31 +1813,64 @@ export const SPOSPRPipelineView: React.FC<SPOSPRPipelineViewProps> = ({
                       </p>
                     </div>
 
-                    {/* Quick KPI stats */}
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
-                      {/* Average Market Price */}
-                      <div className="bg-slate-800/90 px-3.5 py-2.5 rounded-xl border border-amber-500/30 ring-1 ring-amber-500/20">
-                        <div className="text-slate-400 text-[10px] font-semibold">Servis Ortalaması</div>
-                        <div className="text-base sm:text-lg font-black text-amber-400 font-mono mt-0.5">
-                          {canViewPricing
-                            ? (activeServiceAnalysis.avgPrice > 0 
-                                ? `${activeServiceAnalysis.avgPrice.toLocaleString('tr-TR')} TL` 
-                                : 'Fiyat Yok')
-                            : '🔒 Gizli'}
+                    {/* Price Range Banner: En Düşük Fiyattan En Yüksek Fiyata Kadar İbare */}
+                    <div className="flex flex-col sm:flex-row items-stretch sm:items-center gap-3">
+                      <div className="bg-gradient-to-r from-slate-800 via-slate-800/90 to-amber-950/20 px-5 py-4 rounded-2xl border border-amber-500/40 ring-1 ring-amber-500/20 shadow-lg flex-1">
+                        <div className="text-amber-400 text-[10px] font-extrabold uppercase tracking-wider flex items-center gap-1.5 mb-1.5">
+                          <Tag className="w-3.5 h-3.5 text-amber-400" />
+                          <span>Fiyat Aralığı Analizi</span>
                         </div>
+                        {canViewPricing ? (
+                          activeServiceAnalysis.minPrice > 0 ? (
+                            <div>
+                              <div className="text-base sm:text-xl font-black text-white flex items-center gap-2 flex-wrap font-mono">
+                                <span className="text-emerald-400 bg-emerald-950/60 px-2.5 py-1 rounded-lg border border-emerald-700/50">
+                                  En Düşük {activeServiceAnalysis.minPrice.toLocaleString('tr-TR')} TL'den
+                                </span>
+                                <span className="text-slate-400 font-sans font-bold text-sm">→</span>
+                                <span className="text-amber-400 bg-amber-950/60 px-2.5 py-1 rounded-lg border border-amber-700/50">
+                                  En Yüksek {activeServiceAnalysis.maxPrice.toLocaleString('tr-TR')} TL'ye kadar
+                                </span>
+                              </div>
+                              <p className="text-[11px] text-slate-300 mt-2 font-sans leading-relaxed">
+                                Bu hizmet için ağ genelindeki Bosch Car Service bayilerinde fiyatlar <strong className="text-emerald-300 font-mono">{activeServiceAnalysis.minPrice.toLocaleString('tr-TR')} TL</strong> ile <strong className="text-amber-300 font-mono">{activeServiceAnalysis.maxPrice.toLocaleString('tr-TR')} TL</strong> arasında değişmektedir.
+                              </p>
+                            </div>
+                          ) : activeServiceAnalysis.freeCount > 0 ? (
+                            <div className="text-sm sm:text-base font-bold text-emerald-400 font-mono">
+                              0 TL (Ücretsiz / Bakım Kapsamında Dahil Hizmet)
+                            </div>
+                          ) : (
+                            <div className="text-xs text-slate-400 font-medium">
+                              Bu hizmet için ağ genelinde henüz geçerli fiyat girilmemiş (NOPRICE veya Verilmiyor)
+                            </div>
+                          )
+                        ) : (
+                          <div className="text-xs font-bold text-slate-400">
+                            🔒 Fiyat Görme Yetkiniz Bulunmuyor
+                          </div>
+                        )}
                       </div>
 
-                      {/* Price Range (Min - Max) */}
-                      <div className="bg-slate-800/90 px-3.5 py-2.5 rounded-xl border border-slate-700/80">
-                        <div className="text-slate-400 text-[10px] font-semibold">Fiyat Aralığı (Min - Max)</div>
-                        <div className="text-sm font-bold text-white font-mono mt-1 whitespace-nowrap">
-                          {canViewPricing
-                            ? (activeServiceAnalysis.minPrice > 0
-                                ? `${activeServiceAnalysis.minPrice.toLocaleString('tr-TR')} - ${activeServiceAnalysis.maxPrice.toLocaleString('tr-TR')} TL`
-                                : activeServiceAnalysis.freeCount > 0 ? '0 TL (Ücretsiz)' : '-')
-                            : '🔒 Fiyat Gizli'}
+                      {/* Min Price Card */}
+                      {canViewPricing && activeServiceAnalysis.minPrice > 0 && (
+                        <div className="bg-slate-800/95 px-4 py-3 rounded-2xl border border-emerald-500/40 text-center shrink-0 min-w-[130px] shadow">
+                          <div className="text-slate-400 text-[10px] font-bold uppercase tracking-wider">En Düşük Fiyat</div>
+                          <div className="text-base sm:text-lg font-black text-emerald-400 font-mono mt-0.5">
+                            {activeServiceAnalysis.minPrice.toLocaleString('tr-TR')} TL
+                          </div>
                         </div>
-                      </div>
+                      )}
+
+                      {/* Max Price Card */}
+                      {canViewPricing && activeServiceAnalysis.maxPrice > 0 && (
+                        <div className="bg-slate-800/95 px-4 py-3 rounded-2xl border border-amber-500/40 text-center shrink-0 min-w-[130px] shadow">
+                          <div className="text-slate-400 text-[10px] font-bold uppercase tracking-wider">En Yüksek Fiyat</div>
+                          <div className="text-base sm:text-lg font-black text-amber-400 font-mono mt-0.5">
+                            {activeServiceAnalysis.maxPrice.toLocaleString('tr-TR')} TL
+                          </div>
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -1861,66 +1905,180 @@ export const SPOSPRPipelineView: React.FC<SPOSPRPipelineViewProps> = ({
                           {activeServiceAnalysis.offeringDealers.length} Toplam
                         </span>
                       </h4>
-                      <span className="text-[11px] text-slate-400">Hangi servisin fiyat girmediğini aşağıdan filtreleyerek inceleyin</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[11px] text-slate-400 font-medium">Fiyat Sıralaması:</span>
+                        <button
+                          type="button"
+                          onClick={() => setTab2PriceSort((prev) => (prev === 'asc' ? 'desc' : 'asc'))}
+                          className="px-2.5 py-1 rounded-lg text-xs font-bold bg-slate-800 hover:bg-slate-700 text-amber-300 border border-slate-700 transition flex items-center gap-1.5 shadow-sm"
+                          title="Fiyat sıralamasını değiştir (En düşükten en yükseğe / En yüksekten en düşüğe)"
+                        >
+                          <span>{tab2PriceSort === 'asc' ? '⬆ En Düşükten En Yükseğe' : '⬇ En Yüksekten En Düşüğe'}</span>
+                        </button>
+                      </div>
                     </div>
 
                     {/* Filter Tabs */}
-                    <div className="flex flex-wrap items-center gap-1.5 mb-3.5">
-                      <button
-                        type="button"
-                        onClick={() => setServiceDealerFilter('all')}
-                        className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition ${
-                          serviceDealerFilter === 'all'
-                            ? 'bg-amber-500 text-slate-950 font-bold shadow'
-                            : 'bg-slate-800 text-slate-300 hover:text-white border border-slate-700'
-                        }`}
-                      >
-                        Tümü ({activeServiceAnalysis.offeringDealers.length})
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setServiceDealerFilter('priced')}
-                        className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition ${
-                          serviceDealerFilter === 'priced'
-                            ? 'bg-emerald-500 text-slate-950 font-bold shadow'
-                            : 'bg-slate-800 text-slate-300 hover:text-white border border-slate-700'
-                        }`}
-                      >
-                        Fiyat Girenler ({activeServiceAnalysis.pricedCount + activeServiceAnalysis.freeCount})
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setServiceDealerFilter('noprice')}
-                        className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition ${
-                          serviceDealerFilter === 'noprice'
-                            ? 'bg-amber-600 text-white font-bold shadow'
-                            : 'bg-slate-800 text-slate-300 hover:text-white border border-slate-700'
-                        }`}
-                      >
-                        ⚠️ Fiyat Girmeyenler / NOPRICE ({activeServiceAnalysis.noPriceCount + activeServiceAnalysis.offeredYesCount})
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => setServiceDealerFilter('notoffered')}
-                        className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition ${
-                          serviceDealerFilter === 'notoffered'
-                            ? 'bg-red-600 text-white font-bold shadow'
-                            : 'bg-slate-800 text-slate-300 hover:text-white border border-slate-700'
-                        }`}
-                      >
-                        ❌ Vermeyenler / HAYIR ({activeServiceAnalysis.notOfferedCount})
-                      </button>
+                    <div className="flex flex-wrap items-center gap-2 mb-3.5">
+                      <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800">
+                        <button
+                          type="button"
+                          onClick={() => setServiceDealerFilter('all')}
+                          className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition ${
+                            serviceDealerFilter === 'all'
+                              ? 'bg-amber-500 text-slate-950 font-bold shadow'
+                              : 'bg-slate-800 text-slate-300 hover:text-white border border-slate-700'
+                          }`}
+                        >
+                          Tümü ({activeServiceAnalysis.offeringDealers.length})
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setServiceDealerFilter('priced')}
+                          className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition ${
+                            serviceDealerFilter === 'priced'
+                              ? 'bg-emerald-500 text-slate-950 font-bold shadow'
+                              : 'bg-slate-800 text-slate-300 hover:text-white border border-slate-700'
+                          }`}
+                        >
+                          Fiyat Girenler ({activeServiceAnalysis.pricedCount + activeServiceAnalysis.freeCount})
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setServiceDealerFilter('noprice')}
+                          className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition ${
+                            serviceDealerFilter === 'noprice'
+                              ? 'bg-amber-600 text-white font-bold shadow'
+                              : 'bg-slate-800 text-slate-300 hover:text-white border border-slate-700'
+                          }`}
+                        >
+                          ⚠️ Fiyat Girmeyenler / NOPRICE ({activeServiceAnalysis.noPriceCount + activeServiceAnalysis.offeredYesCount})
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setServiceDealerFilter('notoffered')}
+                          className={`px-3 py-1.5 rounded-xl text-xs font-semibold transition ${
+                            serviceDealerFilter === 'notoffered'
+                              ? 'bg-red-600 text-white font-bold shadow'
+                              : 'bg-slate-800 text-slate-300 hover:text-white border border-slate-700'
+                          }`}
+                        >
+                          ❌ Vermeyenler / HAYIR ({activeServiceAnalysis.notOfferedCount})
+                        </button>
+                      </div>
+
+                      {/* Claimed Filter for Tab 2 */}
+                      <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800">
+                        <span className="text-[10px] font-bold text-slate-400 px-1 uppercase">Kayıt (claimed):</span>
+                        <button
+                          type="button"
+                          onClick={() => setTab2ClaimedFilter((prev) => prev === 'EVET' ? 'all' : 'EVET')}
+                          className={`px-2 py-1 rounded-lg text-xs font-bold transition ${
+                            tab2ClaimedFilter === 'EVET'
+                              ? 'bg-emerald-600 text-white ring-1 ring-emerald-400 shadow'
+                              : 'text-emerald-400 hover:bg-emerald-950/40'
+                          }`}
+                        >
+                          ✓ Kayıtlı
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setTab2ClaimedFilter((prev) => prev === 'HAYIR' ? 'all' : 'HAYIR')}
+                          className={`px-2 py-1 rounded-lg text-xs font-bold transition ${
+                            tab2ClaimedFilter === 'HAYIR'
+                              ? 'bg-red-600 text-white ring-1 ring-red-400 shadow'
+                              : 'text-red-400 hover:bg-red-950/40'
+                          }`}
+                        >
+                          ✕ Kayıtsız
+                        </button>
+                        {tab2ClaimedFilter !== 'all' && (
+                          <button
+                            type="button"
+                            onClick={() => setTab2ClaimedFilter('all')}
+                            className="text-[10px] text-slate-400 hover:text-white px-1"
+                            title="Kayıt filtresini temizle"
+                          >
+                            ✕
+                          </button>
+                        )}
+                      </div>
+
+                      {/* Online Booking Filter for Tab 2 */}
+                      <div className="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800">
+                        <span className="text-[10px] font-bold text-slate-400 px-1 uppercase">Online Randevu:</span>
+                        <button
+                          type="button"
+                          onClick={() => setTab2OnlineFilter((prev) => prev === 'EVET' ? 'all' : 'EVET')}
+                          className={`px-2 py-1 rounded-lg text-xs font-bold transition ${
+                            tab2OnlineFilter === 'EVET'
+                              ? 'bg-blue-600 text-white ring-1 ring-blue-400 shadow'
+                              : 'text-blue-400 hover:bg-blue-950/40'
+                          }`}
+                        >
+                          ✓ Online
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setTab2OnlineFilter((prev) => prev === 'HAYIR' ? 'all' : 'HAYIR')}
+                          className={`px-2 py-1 rounded-lg text-xs font-bold transition ${
+                            tab2OnlineFilter === 'HAYIR'
+                              ? 'bg-amber-600 text-slate-950 font-extrabold ring-1 ring-amber-400 shadow'
+                              : 'text-amber-400 hover:bg-amber-950/40'
+                          }`}
+                        >
+                          ✕ Offline
+                        </button>
+                        {tab2OnlineFilter !== 'all' && (
+                          <button
+                            type="button"
+                            onClick={() => setTab2OnlineFilter('all')}
+                            className="text-[10px] text-slate-400 hover:text-white px-1"
+                            title="Online filtresini temizle"
+                          >
+                            ✕
+                          </button>
+                        )}
+                      </div>
                     </div>
 
                     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 max-h-96 overflow-y-auto pr-1">
                       {activeServiceAnalysis.offeringDealers
                         .filter((d) => {
+                          const isDealerClaimed = d.claimed === 'EVET' || String(d.claimed || '').trim().toUpperCase() === 'EVET';
+                          if (tab2ClaimedFilter !== 'all') {
+                            if (tab2ClaimedFilter === 'EVET' && !isDealerClaimed) return false;
+                            if (tab2ClaimedFilter === 'HAYIR' && isDealerClaimed) return false;
+                          }
+
+                          const isDealerOnline = d.spoOnlineBooking === 'EVET' || String(d.spoOnlineBooking || '').trim().toUpperCase() === 'EVET';
+                          if (tab2OnlineFilter !== 'all') {
+                            if (tab2OnlineFilter === 'EVET' && !isDealerOnline) return false;
+                            if (tab2OnlineFilter === 'HAYIR' && isDealerOnline) return false;
+                          }
+
                           if (serviceDealerFilter === 'priced') return d.status === 'PRICED' || d.status === 'FREE';
                           if (serviceDealerFilter === 'noprice') return d.status === 'NO_PRICE' || d.status === 'OFFERED_YES';
                           if (serviceDealerFilter === 'notoffered') return d.status === 'NOT_OFFERED';
                           return true;
                         })
-                        .map((d, idx) => (
+                        .sort((a, b) => {
+                          if (tab2PriceSort === 'asc') {
+                            const valA = a.status === 'PRICED' && a.priceNum !== null ? a.priceNum : (a.status === 'FREE' ? 0 : 999999999);
+                            const valB = b.status === 'PRICED' && b.priceNum !== null ? b.priceNum : (b.status === 'FREE' ? 0 : 999999999);
+                            return valA - valB;
+                          } else if (tab2PriceSort === 'desc') {
+                            const valA = a.status === 'PRICED' && a.priceNum !== null ? a.priceNum : (a.status === 'FREE' ? 0 : -1);
+                            const valB = b.status === 'PRICED' && b.priceNum !== null ? b.priceNum : (b.status === 'FREE' ? 0 : -1);
+                            return valB - valA;
+                          }
+                          return 0;
+                        })
+                        .map((d, idx) => {
+                          const isDealerClaimed = d.claimed === 'EVET' || String(d.claimed || '').trim().toUpperCase() === 'EVET';
+                          const isDealerOnline = d.spoOnlineBooking === 'EVET' || String(d.spoOnlineBooking || '').trim().toUpperCase() === 'EVET';
+
+                          return (
                           <div 
                             key={idx} 
                             className={`border rounded-xl p-3.5 flex items-center justify-between gap-2 transition ${
@@ -1936,6 +2094,22 @@ export const SPOSPRPipelineView: React.FC<SPOSPRPipelineViewProps> = ({
                             <div>
                               <div className="font-semibold text-white text-xs">{d.firmName}</div>
                               <div className="text-[11px] text-slate-400">{d.city} • {d.manager}</div>
+                              <div className="flex items-center gap-1.5 mt-1.5">
+                                <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold border ${
+                                  isDealerClaimed 
+                                    ? 'bg-emerald-950/80 text-emerald-300 border-emerald-800/60' 
+                                    : 'bg-red-950/60 text-red-400 border border-red-900/60'
+                                }`}>
+                                  {isDealerClaimed ? '✓ Kayıtlı' : '✕ Kayıtsız'}
+                                </span>
+                                <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold border ${
+                                  isDealerOnline 
+                                    ? 'bg-blue-950/80 text-blue-300 border-blue-800/60' 
+                                    : 'bg-amber-950/60 text-amber-400 border border-amber-900/60'
+                                }`}>
+                                  {isDealerOnline ? '✓ Online' : '✕ Offline'}
+                                </span>
+                              </div>
                             </div>
                             <div className="text-right shrink-0">
                               {d.status === 'PRICED' ? (
@@ -1955,7 +2129,8 @@ export const SPOSPRPipelineView: React.FC<SPOSPRPipelineViewProps> = ({
                               )}
                             </div>
                           </div>
-                        ))}
+                          );
+                        })}
                     </div>
                   </div>
                 </div>
@@ -1998,8 +2173,33 @@ export const SPOSPRPipelineView: React.FC<SPOSPRPipelineViewProps> = ({
                   {/* Dealer Header */}
                   <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 pb-4">
                     <div>
-                      <span className="text-xs font-mono text-red-400 font-bold">{selectedDealer.customerId}</span>
-                      <h2 className="text-xl font-bold text-white">{selectedDealer.bcsFirmName}</h2>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs font-mono text-red-400 font-bold">{selectedDealer.customerId}</span>
+                        {(() => {
+                          const isClaimed = selectedDealer.claimed === 'EVET' || String(selectedDealer.claimed || '').trim().toUpperCase() === 'EVET';
+                          const isOnline = selectedDealer.spoOnlineBooking === 'EVET' || String(selectedDealer.spoOnlineBooking || '').trim().toUpperCase() === 'EVET';
+
+                          return (
+                            <>
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
+                                isClaimed
+                                  ? 'bg-emerald-950/80 text-emerald-300 border-emerald-800'
+                                  : 'bg-red-950/80 text-red-300 border-red-800'
+                              }`}>
+                                {isClaimed ? '✓ Kayıtlı (claimed: EVET)' : '✕ Kayıtsız (claimed: HAYIR)'}
+                              </span>
+                              <span className={`px-2 py-0.5 rounded text-[10px] font-bold border ${
+                                isOnline
+                                  ? 'bg-blue-950/80 text-blue-300 border-blue-800'
+                                  : 'bg-amber-950/80 text-amber-300 border-amber-800'
+                              }`}>
+                                {isOnline ? '✓ Online Booking: EVET' : '✕ Online Booking: HAYIR'}
+                              </span>
+                            </>
+                          );
+                        })()}
+                      </div>
+                      <h2 className="text-xl font-bold text-white mt-1">{selectedDealer.bcsFirmName}</h2>
                       <div className="text-xs text-slate-400 mt-0.5">
                         {selectedDealer.city} / {selectedDealer.district} • Bölge Yöneticisi: <strong className="text-white">{selectedDealer.regionManager}</strong> • Saha: <strong className="text-white">{selectedDealer.fieldResponsible}</strong>
                       </div>
@@ -2107,7 +2307,11 @@ export const SPOSPRPipelineView: React.FC<SPOSPRPipelineViewProps> = ({
                       return (
                         <div 
                           key={sCol}
-                          className={`p-3.5 rounded-xl border flex items-center justify-between gap-3 ${
+                          onClick={() => {
+                            setSelectedServiceToCompare(sCol);
+                            setActiveTab('servicePricing');
+                          }}
+                          className={`p-3.5 rounded-xl border flex items-center justify-between gap-3 cursor-pointer hover:ring-1 hover:ring-amber-500/50 transition group ${
                             status === 'PRICED'
                               ? 'bg-amber-950/20 border-amber-500/40 text-amber-200'
                               : status === 'FREE'
@@ -2118,6 +2322,7 @@ export const SPOSPRPipelineView: React.FC<SPOSPRPipelineViewProps> = ({
                               ? 'bg-slate-900 border-slate-700 text-slate-400'
                               : 'bg-slate-950/50 border-slate-800/80 text-slate-500'
                           }`}
+                          title={`${title} için en düşük - en yüksek fiyat aralığı analizine gitmek için tıklayın`}
                         >
                           <div className="min-w-0 pr-2">
                             <div className="text-xs font-semibold text-white truncate">{title}</div>
@@ -2199,303 +2404,6 @@ export const SPOSPRPipelineView: React.FC<SPOSPRPipelineViewProps> = ({
                     ))}
                   </tbody>
                 </table>
-              </div>
-            </div>
-          )}
-
-          {/* TAB 5: Price Correlation Analysis */}
-          {activeTab === 'correlation' && (
-            <div className="space-y-6">
-              <div className="bg-slate-900 border border-slate-800 rounded-3xl p-6 sm:p-8 shadow-xl">
-                <div className="flex flex-col md:flex-row md:items-center justify-between gap-4 border-b border-slate-800 pb-5">
-                  <div>
-                    <h3 className="text-xl font-extrabold text-white">Servis Fiyat Korelasyon Analizi</h3>
-                    <p className="text-xs text-slate-400 mt-1">
-                      Ağ genelindeki servislerin fiyatları arasındaki Pearson Korelasyon Katsayısını (r) inceleyin ve iki hizmet arasındaki fiyat ilişkisini dağılım grafiğiyle görselleştirin.
-                    </p>
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <div className="px-3 py-1.5 rounded-xl bg-slate-800 border border-slate-700 text-xs font-semibold text-emerald-400">
-                      Örneklem: {activeRowsForCorr.length} Servis
-                    </div>
-                  </div>
-                </div>
-
-                {/* Service Pair Selectors & Correlation Stats */}
-                <div className="grid grid-cols-1 lg:grid-cols-3 gap-6 mt-6">
-                  {/* Service A Selector */}
-                  <div className="space-y-2">
-                    <label className="text-xs font-bold text-slate-300 uppercase tracking-wider">1. Hizmet (X Ekseni)</label>
-                    <select
-                      value={corrServiceA}
-                      onChange={(e) => setCorrServiceA(e.target.value)}
-                      className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                    >
-                      {serviceColumnsForCorr.map((col) => {
-                        const meta = summary?.serviceColumnMeta?.[col];
-                        const label = meta ? `${meta.serviceCode || col} - ${meta.serviceName}` : col;
-                        return (
-                          <option key={`corr-a-${col}`} value={col}>
-                            {label}
-                          </option>
-                        );
-                      })}
-                    </select>
-                  </div>
-
-                  {/* Service B Selector */}
-                  <div className="space-y-2">
-                    <label className="text-xs font-bold text-slate-300 uppercase tracking-wider">2. Hizmet (Y Ekseni)</label>
-                    <select
-                      value={corrServiceB}
-                      onChange={(e) => setCorrServiceB(e.target.value)}
-                      className="w-full bg-slate-800 border border-slate-700 rounded-xl px-4 py-2.5 text-xs text-white focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                    >
-                      {serviceColumnsForCorr.map((col) => {
-                        const meta = summary?.serviceColumnMeta?.[col];
-                        const label = meta ? `${meta.serviceCode || col} - ${meta.serviceName}` : col;
-                        return (
-                          <option key={`corr-b-${col}`} value={col}>
-                            {label}
-                          </option>
-                        );
-                      })}
-                    </select>
-                  </div>
-
-                  {/* Key Metrics Card */}
-                  <div className="bg-slate-800/80 border border-slate-700/80 rounded-2xl p-4 flex flex-col justify-center">
-                    <div className="flex items-center justify-between mb-2">
-                      <span className="text-[11px] font-bold text-slate-400 uppercase">Pearson Korelasyon (r)</span>
-                      <span className={`px-2 py-0.5 rounded text-[11px] font-extrabold ${
-                        currentCorrelationResult.r >= 0.7 ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' :
-                        currentCorrelationResult.r >= 0.3 ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30' :
-                        currentCorrelationResult.r <= -0.3 ? 'bg-red-500/20 text-red-400 border border-red-500/30' :
-                        'bg-slate-700 text-slate-300'
-                      }`}>
-                        {currentCorrelationResult.r >= 0.7 ? 'Güçlü Pozitif' :
-                         currentCorrelationResult.r >= 0.3 ? 'Orta Pozitif' :
-                         currentCorrelationResult.r <= -0.3 ? 'Negatif' : 'Zayıf / Nötr'}
-                      </span>
-                    </div>
-                    <div className="text-2xl font-black text-white">
-                      {currentCorrelationResult.r.toFixed(3)}
-                    </div>
-                    <div className="text-[11px] text-slate-400 mt-1">
-                      Ortak Fiyat Giren Servis Sayısı (n): <strong className="text-white">{currentCorrelationResult.n}</strong>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Scatter Plot Visualizer */}
-                <div className="mt-8 bg-slate-950/60 border border-slate-800 rounded-2xl p-5">
-                  <div className="flex items-center justify-between mb-4">
-                    <h4 className="text-xs font-bold text-white uppercase tracking-wider">Servis Fiyat Dağılım Grafiği (Scatter Plot)</h4>
-                    <span className="text-[11px] text-slate-400">Her nokta bir Bosch Car Service bayisini temsil eder</span>
-                  </div>
-
-                  {currentCorrelationResult.pairs.length === 0 ? (
-                    <div className="py-16 text-center text-slate-400 text-xs">
-                      Seçilen iki hizmet için her iki serviste de geçerli fiyat verisi bulunan ortak bayi bulunamadı.
-                    </div>
-                  ) : (
-                    <div className="relative h-72 w-full border-l border-b border-slate-700 p-2 flex items-end">
-                      {(() => {
-                        const xs = currentCorrelationResult.pairs.map(p => p.x);
-                        const ys = currentCorrelationResult.pairs.map(p => p.y);
-                        const minX = Math.min(...xs);
-                        const maxX = Math.max(...xs);
-                        const minY = Math.min(...ys);
-                        const maxY = Math.max(...ys);
-                        const rangeX = maxX - minX || 1;
-                        const rangeY = maxY - minY || 1;
-
-                        return (
-                          <div className="absolute inset-0 p-4">
-                            <div className="relative w-full h-full border border-slate-800/80 bg-slate-900/40 rounded-xl overflow-hidden">
-                              {currentCorrelationResult.pairs.map((pt, idx) => {
-                                const leftPct = ((pt.x - minX) / rangeX) * 90 + 5;
-                                const bottomPct = ((pt.y - minY) / rangeY) * 90 + 5;
-                                return (
-                                  <div
-                                    key={`pt-${idx}`}
-                                    className="absolute w-3 h-3 -ml-1.5 -mb-1.5 rounded-full bg-emerald-500 hover:bg-amber-400 border border-white/40 shadow-md cursor-pointer transition transform hover:scale-150 group"
-                                    style={{ left: `${leftPct}%`, bottom: `${bottomPct}%` }}
-                                  >
-                                    <div className="absolute bottom-4 left-1/2 -translate-x-1/2 hidden group-hover:block bg-slate-900 text-white text-[10px] rounded px-2 py-1 shadow-xl whitespace-nowrap z-50 border border-slate-700">
-                                      <p className="font-bold">{pt.firmName} ({pt.city})</p>
-                                      <p>X: {pt.x.toLocaleString()} TL</p>
-                                      <p>Y: {pt.y.toLocaleString()} TL</p>
-                                    </div>
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          </div>
-                        );
-                      })()}
-                    </div>
-                  )}
-
-                  <div className="flex items-center justify-between text-[11px] text-slate-400 mt-3 px-2">
-                    {currentCorrelationResult.pairs.length > 0 ? (
-                      <>
-                        <span>Min/Max X: {Math.min(...currentCorrelationResult.pairs.map(p => p.x)).toLocaleString()} TL - {Math.max(...currentCorrelationResult.pairs.map(p => p.x)).toLocaleString()} TL</span>
-                        <span>Min/Max Y: {Math.min(...currentCorrelationResult.pairs.map(p => p.y)).toLocaleString()} TL - {Math.max(...currentCorrelationResult.pairs.map(p => p.y)).toLocaleString()} TL</span>
-                      </>
-                    ) : null}
-                  </div>
-                </div>
-
-                {/* Top Correlations Summary Table */}
-                <div className="mt-8">
-                  <h4 className="text-xs font-bold text-white uppercase tracking-wider mb-4">Ağ Genelindeki En Güçlü Fiyat Korelasyonları</h4>
-                  <div className="overflow-x-auto border border-slate-800 rounded-2xl">
-                    <table className="w-full text-left border-collapse text-xs">
-                      <thead>
-                        <tr className="bg-slate-950 text-slate-400 border-b border-slate-800">
-                          <th className="py-3 px-4 font-semibold">1. Hizmet (X)</th>
-                          <th className="py-3 px-4 font-semibold">2. Hizmet (Y)</th>
-                          <th className="py-3 px-4 font-semibold">Korelasyon (r)</th>
-                          <th className="py-3 px-4 font-semibold">Ortak Servis (n)</th>
-                          <th className="py-3 px-4 font-semibold">İlişki Gücü</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-800/60">
-                        {topCorrelationsList.map((item, idx) => {
-                          const metaA = summary?.serviceColumnMeta?.[item.colA];
-                          const metaB = summary?.serviceColumnMeta?.[item.colB];
-                          const nameA = metaA ? `${metaA.serviceCode || item.colA} - ${metaA.serviceName}` : item.colA;
-                          const nameB = metaB ? `${metaB.serviceCode || item.colB} - ${metaB.serviceName}` : item.colB;
-
-                          return (
-                            <tr key={`top-corr-${idx}`} className="hover:bg-slate-800/40 transition">
-                              <td className="py-3 px-4 font-medium text-white">{nameA}</td>
-                              <td className="py-3 px-4 font-medium text-white">{nameB}</td>
-                              <td className="py-3 px-4 font-mono font-bold text-emerald-400">{item.r.toFixed(3)}</td>
-                              <td className="py-3 px-4 font-mono text-slate-300">{item.n}</td>
-                              <td className="py-3 px-4">
-                                <span className={`px-2 py-0.5 rounded text-[10px] font-bold ${
-                                  item.r >= 0.7 ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' :
-                                  item.r >= 0.4 ? 'bg-blue-500/20 text-blue-400 border border-blue-500/30' :
-                                  'bg-slate-800 text-slate-300'
-                                }`}>
-                                  {item.r >= 0.7 ? 'Çok Güçlü' : item.r >= 0.4 ? 'Güçlü' : 'Orta'}
-                                </span>
-                              </td>
-                            </tr>
-                          );
-                        })}
-                      </tbody>
-                    </table>
-                  </div>
-                </div>
-
-                {/* Price Frequency Distribution: Şu hizmetten şu fiyatta n tane var */}
-                <div className="mt-8 bg-slate-950/60 border border-slate-800 rounded-2xl p-5 sm:p-6">
-                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-6">
-                    <div>
-                      <h4 className="text-xs font-bold text-white uppercase tracking-wider">Fiyat Frekans Dağılımı (Şu Hizmetten Şu Fiyatta Kaç Servis Var?)</h4>
-                      <p className="text-[11px] text-slate-400 mt-0.5">Seçilen hizmet için ağ genelindeki fiyat noktalarını ve bu fiyatı veren servis adetlerini (n) inceleyin.</p>
-                    </div>
-                    <div className="w-full sm:w-72">
-                      <select
-                        value={priceFreqService}
-                        onChange={(e) => setPriceFreqService(e.target.value)}
-                        className="w-full bg-slate-800 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white focus:outline-none focus:ring-2 focus:ring-amber-500"
-                      >
-                        {serviceColumnsForCorr.map((col) => {
-                          const meta = summary?.serviceColumnMeta?.[col];
-                          const label = meta ? `${meta.serviceCode || col} - ${meta.serviceName}` : col;
-                          return (
-                            <option key={`pf-svc-${col}`} value={col}>
-                              {label}
-                            </option>
-                          );
-                        })}
-                      </select>
-                    </div>
-                  </div>
-
-                  {priceFrequencyData.length === 0 ? (
-                    <div className="py-12 text-center text-slate-400 text-xs">
-                      Seçilen hizmet için geçerli fiyat verisi bulunamadı.
-                    </div>
-                  ) : (
-                    <div className="space-y-6">
-                      {/* Visual Frequency Bars / Distribution */}
-                      <div className="bg-slate-900 border border-slate-800 rounded-xl p-4">
-                        <div className="text-[11px] font-bold text-slate-400 mb-3 uppercase tracking-wider">Fiyat Dağılım Grafiği (Fiyat vs Servis Adedi n)</div>
-                        <div className="flex items-end gap-2 h-40 pt-6 px-2 overflow-x-auto pb-2 border-b border-slate-800">
-                          {priceFrequencyData.map((item, idx) => {
-                            const heightPct = Math.round((item.count / maxPriceCount) * 100);
-                            return (
-                              <div key={`freq-bar-${idx}`} className="flex flex-col items-center flex-1 min-w-[36px] group relative">
-                                {/* Tooltip on hover */}
-                                <div className="absolute bottom-full mb-2 hidden group-hover:flex flex-col bg-slate-900 text-white text-[10px] rounded p-2 shadow-xl whitespace-nowrap z-50 border border-slate-700">
-                                  <span className="font-bold text-amber-400">{item.price.toLocaleString('tr-TR')} TL</span>
-                                  <span>Servis Adedi (n): <strong>{item.count}</strong></span>
-                                  <span className="text-[9px] text-slate-400 mt-1 max-w-[150px] truncate">
-                                    {item.firms.map(f => f.firmName).slice(0, 3).join(', ')}
-                                    {item.firms.length > 3 ? '...' : ''}
-                                  </span>
-                                </div>
-                                <div className="text-[10px] font-mono font-bold text-amber-400 mb-1">{item.count}</div>
-                                <div 
-                                  className="w-full bg-amber-500 hover:bg-amber-400 rounded-t transition-all duration-300 cursor-pointer"
-                                  style={{ height: `${Math.max(heightPct, 8)}%` }}
-                                />
-                                <div className="text-[9px] font-mono text-slate-400 mt-2 truncate w-full text-center">
-                                  {item.price > 1000 ? `${Math.round(item.price / 1000)}k` : item.price}
-                                </div>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-
-                      {/* Frequency Table */}
-                      <div className="overflow-x-auto border border-slate-800 rounded-xl">
-                        <table className="w-full text-left border-collapse text-xs">
-                          <thead>
-                            <tr className="bg-slate-950 text-slate-400 border-b border-slate-800">
-                              <th className="py-3 px-4 font-semibold">Fiyat (TL)</th>
-                              <th className="py-3 px-4 font-semibold">Servis Adedi (n)</th>
-                              <th className="py-3 px-4 font-semibold">Ağ İçindeki Payı</th>
-                              <th className="py-3 px-4 font-semibold">Bu Fiyatı Veren Bazı Servisler</th>
-                            </tr>
-                          </thead>
-                          <tbody className="divide-y divide-slate-800/60">
-                            {priceFrequencyData.map((item, idx) => {
-                              const totalCount = priceFrequencyData.reduce((acc, cur) => acc + cur.count, 0);
-                              const pct = totalCount > 0 ? ((item.count / totalCount) * 100).toFixed(1) : '0';
-                              return (
-                                <tr key={`freq-row-${idx}`} className="hover:bg-slate-800/40 transition">
-                                  <td className="py-3 px-4 font-mono font-bold text-amber-400 text-sm">
-                                    {item.price.toLocaleString('tr-TR')} TL
-                                  </td>
-                                  <td className="py-3 px-4 font-mono font-extrabold text-white">
-                                    <span className="px-2.5 py-1 rounded-lg bg-amber-500/10 text-amber-300 border border-amber-500/30">
-                                      {item.count} Servis
-                                    </span>
-                                  </td>
-                                  <td className="py-3 px-4 font-mono text-slate-300">
-                                    %{pct}
-                                  </td>
-                                  <td className="py-3 px-4 text-slate-400 text-[11px]">
-                                    {item.firms.map((f, i) => `${f.firmName} (${f.city})`).slice(0, 4).join(', ')}
-                                    {item.firms.length > 4 ? ` ve ${item.firms.length - 4} servis daha...` : ''}
-                                  </td>
-                                </tr>
-                              );
-                            })}
-                          </tbody>
-                        </table>
-                      </div>
-                    </div>
-                  )}
-                </div>
-
               </div>
             </div>
           )}
